@@ -8,11 +8,6 @@
 
 This service implements [OAuth 2.0 specification](https://tools.ietf.org/html/rfc6749). Excerpts from the specification are included in this README file to describe different grant types. Please read the full spec for more detailed information.
 
-[![Travis Status for RichardKnop/go-oauth2-server](https://travis-ci.org/RichardKnop/go-oauth2-server.svg?branch=master&label=linux+build)](https://travis-ci.org/RichardKnop/go-oauth2-server)
-[![godoc for RichardKnop/go-oauth2-server](https://godoc.org/github.com/nathany/looper?status.svg)](http://godoc.org/github.com/RichardKnop/go-oauth2-server)
-[![codecov for RichardKnop/go-oauth2-server](https://codecov.io/gh/RichardKnop/go-oauth2-server/branch/master/graph/badge.svg)](https://codecov.io/gh/RichardKnop/go-oauth2-server)
-
-[![Sourcegraph for RichardKnop/go-oauth2-server](https://sourcegraph.com/github.com/RichardKnop/go-oauth2-server/-/badge.svg)](https://sourcegraph.com/github.com/RichardKnop/go-oauth2-server?badge)
 [![Donate Bitcoin](https://img.shields.io/badge/donate-bitcoin-orange.svg)](https://richardknop.github.io/donate/)
 
 ---

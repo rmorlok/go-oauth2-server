@@ -1,40 +1,52 @@
-# Start from a Debian image with the latest version of Go installed
-# and a workspace (GOPATH) configured at /go.
-FROM golang
+# Build stage
+FROM golang:1.25.7 AS builder
 
-# Contact maintainer with any issues you encounter
-MAINTAINER Richard Knop <risoknop@gmail.com>
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    gcc \
+    libc6-dev \
+    libsqlite3-dev \
+  && rm -rf /var/lib/apt/lists/*
 
-# Set environment variables
-ENV PATH /go/bin:$PATH
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Build the server binary (CGO enabled for sqlite3)
+ENV CGO_ENABLED=1
+RUN go build -o /out/go-oauth2-server .
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+LABEL maintainer="Richard Knop <risoknop@gmail.com>"
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libsqlite3-0 \
+  && rm -rf /var/lib/apt/lists/*
 
 # Create a new unprivileged user
-RUN useradd --user-group --shell /bin/false app
+RUN useradd --system --user-group --home /home/app --shell /usr/sbin/nologin app
 
-# Cd into the api code directory
-WORKDIR /go/src/github.com/RichardKnop/go-oauth2-server
+WORKDIR /app
 
-# Copy the local package files to the container's workspace.
-ADD . /go/src/github.com/RichardKnop/go-oauth2-server
+COPY --from=builder /out/go-oauth2-server /usr/local/bin/go-oauth2-server
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --chown=app:app oauth/fixtures ./oauth/fixtures
+COPY --chown=app:app web ./web
+COPY --chown=app:app public ./public
 
-# Set GO111MODULE=on variable to activate module support
-ENV GO111MODULE on
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+  && chown app:app /usr/local/bin/go-oauth2-server /usr/local/bin/docker-entrypoint.sh
 
-# Chown the application directory to app user
-RUN chown -R app:app /go/src/github.com/RichardKnop/go-oauth2-server/
-
-# Create user's home directory
-RUN mkdir -p /home/app
-RUN chown app /home/app
-
-# Use the unprivileged user
 USER app
 
-# Install the api program
-RUN go install github.com/RichardKnop/go-oauth2-server
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
-# User docker-entrypoint.sh script as entrypoint
-ENTRYPOINT ["./docker-entrypoint.sh"]
-
-# Document that the service listens on port 8080.
 EXPOSE 8080

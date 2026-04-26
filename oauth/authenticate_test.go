@@ -163,34 +163,37 @@ func (suite *OauthTestSuite) TestAuthenticateRollingRefreshToken() {
 		assert.NoError(suite.T(), err, "Inserting test data failed")
 	}
 
-	// Insert some test access tokens
+	// Insert some test access tokens. CreatedAt values are explicitly staggered
+	// so ORDER BY created_at is stable — wall-clock resolution is not enough
+	// when three rows are inserted back-to-back on a fast machine.
+	refreshBase := time.Now().UTC()
 	testRefreshTokens = []*models.OauthRefreshToken{
 		{
 			MyGormModel: models.MyGormModel{
 				ID:        uuid.New(),
-				CreatedAt: time.Now().UTC(),
+				CreatedAt: refreshBase,
 			},
 			Token:     "test_token_1",
-			ExpiresAt: time.Now().UTC().Add(+10 * time.Second),
+			ExpiresAt: refreshBase.Add(+10 * time.Second),
 			Client:    suite.clients[0],
 			User:      suite.users[0],
 		},
 		{
 			MyGormModel: models.MyGormModel{
 				ID:        uuid.New(),
-				CreatedAt: time.Now().UTC(),
+				CreatedAt: refreshBase.Add(time.Second),
 			},
 			Token:     "test_token_2",
-			ExpiresAt: time.Now().UTC().Add(+10 * time.Second),
+			ExpiresAt: refreshBase.Add(+10 * time.Second),
 			Client:    suite.clients[0],
 		},
 		{
 			MyGormModel: models.MyGormModel{
 				ID:        uuid.New(),
-				CreatedAt: time.Now().UTC(),
+				CreatedAt: refreshBase.Add(2 * time.Second),
 			},
 			Token:     "test_token_3",
-			ExpiresAt: time.Now().UTC().Add(+10 * time.Second),
+			ExpiresAt: refreshBase.Add(+10 * time.Second),
 			Client:    suite.clients[0],
 			User:      suite.users[1],
 		},

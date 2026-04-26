@@ -1,12 +1,10 @@
-version: "2"
-
 services:
   postgres:
     container_name: go_oauth2_server_sut_postgres
-    image: "postgres"
+    image: "postgres:16"
     environment:
       POSTGRES_USER: "go_oauth2_server"
-      POSTGRES_PASSWORD: ""
+      POSTGRES_HOST_AUTH_METHOD: "trust"
       POSTGRES_DB: "go_oauth2_server"
     logging:
       driver: none
@@ -14,8 +12,6 @@ services:
   sut:
     container_name: go_oauth2_server_sut
     depends_on:
-      - postgres
-    links:
       - postgres
     build:
       context: .

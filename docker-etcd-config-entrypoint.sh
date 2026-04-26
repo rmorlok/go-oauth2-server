@@ -3,7 +3,7 @@
 set -e
 
 # to make sure etcd is ready (election ended and leader elected)
-while ! etcdctl endpoint health &>/dev/null; do :; done
+while ! etcdctl endpoint health >/dev/null 2>&1; do :; done
 
 exec etcdctl put /config/go_oauth2_server.json '{
   "Database": {

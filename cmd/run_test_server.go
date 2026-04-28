@@ -44,18 +44,19 @@ func RunTestServer(dbPath string, port int) error {
 	}
 	defer services.Close()
 
+	testService := testmode.NewService(cnf, db, services.OauthService)
+
 	app := negroni.New()
 	app.Use(negroni.NewRecovery())
 	app.Use(negroni.NewLogger())
 	app.Use(gzip.Gzip(gzip.DefaultCompression))
 	app.Use(negroni.NewStatic(http.Dir("public")))
+	app.Use(testService.Middleware())
 
 	router := mux.NewRouter()
 	services.HealthService.RegisterRoutes(router, "/v1")
 	services.OauthService.RegisterRoutes(router, "/v1/oauth")
 	services.WebService.RegisterRoutes(router, "/web")
-
-	testService := testmode.NewService(cnf, db, services.OauthService)
 	testService.RegisterRoutes(router, "/test")
 
 	app.UseHandler(router)

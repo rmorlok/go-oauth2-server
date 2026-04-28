@@ -32,5 +32,17 @@ func (s *Service) GetRoutes() []routes.Route {
 			Pattern:     "/users",
 			HandlerFunc: s.createUser,
 		},
+		{
+			Name:        "test_authorize",
+			Method:      "POST",
+			Pattern:     "/authorize",
+			HandlerFunc: s.authorize,
+		},
+		{
+			Name:        "test_requests",
+			Method:      "GET",
+			Pattern:     "/requests",
+			HandlerFunc: s.requestsHandler,
+		},
 	}
 }

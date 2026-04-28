@@ -48,6 +48,14 @@ func migrate0001(db *gorm.DB, name string) error {
 	if err := db.CreateTable(new(OauthAuthorizationCode)).Error; err != nil {
 		return fmt.Errorf("Error creating oauth_authorization_codes table: %s", err)
 	}
+
+	// SQLite does not support adding foreign keys via ALTER TABLE. FK
+	// constraints are not enforced in test-mode SQLite; the tables retain
+	// the same column shape so application logic behaves identically.
+	if db.Dialect().GetName() == "sqlite3" {
+		return nil
+	}
+
 	err := db.Model(new(OauthUser)).AddForeignKey(
 		"role_id", "oauth_roles(id)",
 		"RESTRICT", "RESTRICT",

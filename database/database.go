@@ -9,6 +9,7 @@ import (
 
 	// Drivers
 	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func init() {
@@ -47,6 +48,23 @@ func NewDatabase(cnf *config.Config) (*gorm.DB, error) {
 		// Database logging
 		db.LogMode(cnf.IsDevelopment)
 
+		return db, nil
+	}
+
+	// SQLite
+	if cnf.Database.Type == "sqlite3" {
+		// cnf.Database.DatabaseName carries the file path or ":memory:"
+		db, err := gorm.Open("sqlite3", cnf.Database.DatabaseName)
+		if err != nil {
+			return db, err
+		}
+
+		// Enforce foreign keys in SQLite (off by default)
+		if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+			return db, err
+		}
+
+		db.LogMode(cnf.IsDevelopment)
 		return db, nil
 	}
 

@@ -49,9 +49,13 @@ func RunTestServer(dbPath string, port int) error {
 	app := negroni.New()
 	app.Use(negroni.NewRecovery())
 	app.Use(negroni.NewLogger())
+	// Recorder + script middleware run BEFORE gzip so script-injected
+	// responses (and hijacked connections for drop_connection) bypass the
+	// gzip writer wrap.
+	app.Use(testService.Middleware())
+	app.Use(testService.ScriptMiddleware())
 	app.Use(gzip.Gzip(gzip.DefaultCompression))
 	app.Use(negroni.NewStatic(http.Dir("public")))
-	app.Use(testService.Middleware())
 
 	router := mux.NewRouter()
 	services.HealthService.RegisterRoutes(router, "/v1")

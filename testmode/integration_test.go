@@ -54,6 +54,7 @@ func newTestApp(t *testing.T, withTestMode bool) *testApp {
 	if withTestMode {
 		ts := testmode.NewService(cnf, db, oauthService)
 		app.Use(ts.Middleware())
+		app.Use(ts.ScriptMiddleware())
 		ts.RegisterRoutes(router, "/test")
 		rec = ts.Recorder()
 	}
@@ -423,6 +424,198 @@ func TestRequestRecording(t *testing.T) {
 			if strings.HasPrefix(e.Path, "/test/") {
 				t.Fatalf("control-plane path should not be recorded: %s", e.Path)
 			}
+		}
+	})
+}
+
+func TestScriptQueue(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	mustPostJSON(t, srv.URL+"/test/clients", map[string]string{
+		"key":          "scr-client",
+		"secret":       "scr-secret",
+		"redirect_uri": "https://x.example.com/cb",
+	})
+
+	tokenCall := func(t *testing.T) *http.Response {
+		t.Helper()
+		form := url.Values{}
+		form.Set("grant_type", "client_credentials")
+		form.Set("scope", "read")
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("scr-client", "scr-secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("token: %v", err)
+		}
+		return resp
+	}
+
+	t.Run("queued 503 then real handler success", func(t *testing.T) {
+		// Enqueue one 503 action. Next call should be 503; the call after
+		// that should fall through to the real handler.
+		buf, _ := json.Marshal(map[string]any{
+			"client_id": "scr-client",
+			"endpoint":  "token",
+			"actions": []map[string]any{
+				{"body_template": "temporarily_unavailable_503"},
+			},
+		})
+		resp, _ := http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("expected 204 from /test/scripts, got %d", resp.StatusCode)
+		}
+		resp.Body.Close()
+
+		first := tokenCall(t)
+		if first.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d", first.StatusCode)
+		}
+		first.Body.Close()
+
+		second := tokenCall(t)
+		body, _ := io.ReadAll(second.Body)
+		second.Body.Close()
+		if second.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 fall-through, got %d body=%s", second.StatusCode, body)
+		}
+	})
+
+	t.Run("scope_override empty string omits scope from response", func(t *testing.T) {
+		emptyScope := ""
+		buf, _ := json.Marshal(map[string]any{
+			"client_id": "scr-client",
+			"endpoint":  "token",
+			"actions": []map[string]any{
+				{"scope_override": &emptyScope},
+			},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		resp := tokenCall(t)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var generic map[string]any
+		json.Unmarshal(body, &generic)
+		if _, has := generic["scope"]; has {
+			t.Fatalf("expected scope omitted, got %s", body)
+		}
+		if _, has := generic["access_token"]; !has {
+			t.Fatalf("expected access_token still present, got %s", body)
+		}
+	})
+
+	t.Run("scope_override non-empty replaces scope", func(t *testing.T) {
+		newScope := "narrowed"
+		buf, _ := json.Marshal(map[string]any{
+			"client_id": "scr-client",
+			"endpoint":  "token",
+			"actions": []map[string]any{
+				{"scope_override": &newScope},
+			},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		resp := tokenCall(t)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var generic map[string]any
+		json.Unmarshal(body, &generic)
+		if generic["scope"] != "narrowed" {
+			t.Fatalf("expected scope=narrowed, got %v (body=%s)", generic["scope"], body)
+		}
+	})
+
+	t.Run("fail_count repeats then drops", func(t *testing.T) {
+		buf, _ := json.Marshal(map[string]any{
+			"client_id": "scr-client",
+			"endpoint":  "token",
+			"actions": []map[string]any{
+				{"status": 418, "body": `{"e":"teapot"}`, "fail_count": 2},
+			},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		first := tokenCall(t)
+		first.Body.Close()
+		second := tokenCall(t)
+		second.Body.Close()
+		third := tokenCall(t)
+		third.Body.Close()
+
+		if first.StatusCode != 418 || second.StatusCode != 418 {
+			t.Fatalf("expected 418,418 got %d,%d", first.StatusCode, second.StatusCode)
+		}
+		if third.StatusCode != http.StatusOK {
+			t.Fatalf("third call should fall through to 200, got %d", third.StatusCode)
+		}
+	})
+
+	t.Run("wildcard client_id matches any caller", func(t *testing.T) {
+		buf, _ := json.Marshal(map[string]any{
+			// no client_id
+			"endpoint": "token",
+			"actions":  []map[string]any{{"status": 599, "body": `{}`}},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		resp := tokenCall(t)
+		resp.Body.Close()
+		if resp.StatusCode != 599 {
+			t.Fatalf("expected wildcard to match, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("DELETE clears queues", func(t *testing.T) {
+		buf, _ := json.Marshal(map[string]any{
+			"client_id": "scr-client",
+			"endpoint":  "token",
+			"actions":   []map[string]any{{"status": 599, "body": `{}`}},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		req, _ := http.NewRequest("DELETE", srv.URL+"/test/scripts", nil)
+		resp, _ := http.DefaultClient.Do(req)
+		resp.Body.Close()
+
+		listResp := mustGet(t, srv.URL+"/test/scripts")
+		body, _ := io.ReadAll(listResp.Body)
+		listResp.Body.Close()
+		var snap []testmode.QueueSnapshot
+		json.Unmarshal(body, &snap)
+		if len(snap) != 0 {
+			t.Fatalf("expected empty snapshot, got %v", snap)
+		}
+
+		// Token call should fall through.
+		fall := tokenCall(t)
+		fall.Body.Close()
+		if fall.StatusCode != http.StatusOK {
+			t.Fatalf("expected fall-through 200 after clear, got %d", fall.StatusCode)
+		}
+	})
+
+	t.Run("drop_connection causes client read error", func(t *testing.T) {
+		buf, _ := json.Marshal(map[string]any{
+			"client_id": "scr-client",
+			"endpoint":  "token",
+			"actions":   []map[string]any{{"drop_connection": true}},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		// Use a non-keepalive client so we see the close cleanly.
+		client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+		form := url.Values{}
+		form.Set("grant_type", "client_credentials")
+		form.Set("scope", "read")
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("scr-client", "scr-secret")
+		_, err := client.Do(req)
+		if err == nil {
+			t.Fatalf("expected connection error from drop_connection, got nil")
 		}
 	})
 }

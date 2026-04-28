@@ -12,6 +12,7 @@ type Service struct {
 	db           *gorm.DB
 	oauthService oauth.ServiceInterface
 	recorder     *Recorder
+	queue        *ScriptQueue
 }
 
 // NewService constructs a test-mode service.
@@ -21,6 +22,7 @@ func NewService(cnf *config.Config, db *gorm.DB, oauthService oauth.ServiceInter
 		db:           db,
 		oauthService: oauthService,
 		recorder:     NewRecorder(0),
+		queue:        NewScriptQueue(),
 	}
 }
 
@@ -30,8 +32,19 @@ func (s *Service) Recorder() *Recorder {
 	return s.recorder
 }
 
+// Queue returns the script queue.
+func (s *Service) Queue() *ScriptQueue {
+	return s.queue
+}
+
 // Middleware returns a negroni-compatible middleware that records requests
 // matching classifyEndpoint.
 func (s *Service) Middleware() *recorderMiddleware {
 	return &recorderMiddleware{rec: s.recorder}
+}
+
+// ScriptMiddleware returns a negroni-compatible middleware that intercepts
+// requests using queued Actions.
+func (s *Service) ScriptMiddleware() *scriptMiddleware {
+	return &scriptMiddleware{queue: s.queue}
 }

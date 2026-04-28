@@ -44,5 +44,9 @@ type ServiceInterface interface {
 	NewIntrospectResponseFromAccessToken(accessToken *models.OauthAccessToken) (*IntrospectResponse, error)
 	NewIntrospectResponseFromRefreshToken(refreshToken *models.OauthRefreshToken) (*IntrospectResponse, error)
 	ClearUserTokens(userSession *session.UserSession)
+	RevokeToken(token, hint string, client *models.OauthClient) error
+	AdminRevokeByToken(token string) (bool, error)
+	AdminRevokeByUser(userID string) (int64, int64, error)
+	AdminRevokeByClient(clientID string) (int64, int64, error)
 	Close()
 }

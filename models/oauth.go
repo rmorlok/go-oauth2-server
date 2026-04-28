@@ -96,6 +96,10 @@ type OauthAccessToken struct {
 	Token     string    `sql:"type:varchar(40);unique;not null"`
 	ExpiresAt time.Time `sql:"not null"`
 	Scope     string    `sql:"type:varchar(200);not null"`
+
+	// RevokedAt is set by RFC 7009 revocation (and by cascade when the
+	// associated refresh token is revoked).
+	RevokedAt *time.Time `sql:"index"`
 }
 
 // TableName specifies table name

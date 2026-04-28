@@ -14,6 +14,9 @@ var (
 	ErrAccessTokenNotFound = errors.New("Access token not found")
 	// ErrAccessTokenExpired ...
 	ErrAccessTokenExpired = errors.New("Access token expired")
+	// ErrAccessTokenRevoked is returned when an access token has been
+	// revoked via RFC 7009 (or by cascade from a refresh-token revocation).
+	ErrAccessTokenRevoked = errors.New("Access token revoked")
 )
 
 // Authenticate checks the access token is valid
@@ -25,6 +28,11 @@ func (s *Service) Authenticate(token string) (*models.OauthAccessToken, error) {
 	// Not found
 	if notFound {
 		return nil, ErrAccessTokenNotFound
+	}
+
+	// Check the access token hasn't been revoked
+	if accessToken.RevokedAt != nil {
+		return nil, ErrAccessTokenRevoked
 	}
 
 	// Check the access token hasn't expired

@@ -17,6 +17,10 @@ var (
 			Name:     "refresh_token_rotation",
 			Function: migrate0002,
 		},
+		{
+			Name:     "access_token_revocation",
+			Function: migrate0003,
+		},
 	}
 )
 
@@ -127,6 +131,16 @@ func migrate0001(db *gorm.DB, name string) error {
 func migrate0002(db *gorm.DB, name string) error {
 	if err := db.AutoMigrate(new(OauthRefreshToken)).Error; err != nil {
 		return fmt.Errorf("Error adding refresh-token rotation columns: %s", err)
+	}
+	return nil
+}
+
+// migrate0003 adds revoked_at to oauth_access_tokens so RFC 7009
+// revocation (and the refresh-token cascade) can mark access tokens
+// invalid without deleting their rows. Additive.
+func migrate0003(db *gorm.DB, name string) error {
+	if err := db.AutoMigrate(new(OauthAccessToken)).Error; err != nil {
+		return fmt.Errorf("Error adding access-token revocation column: %s", err)
 	}
 	return nil
 }

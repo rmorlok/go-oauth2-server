@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -59,7 +60,24 @@ func RunTestServer(dbPath string, port int) error {
 
 	app.UseHandler(router)
 
-	log.INFO.Printf("test-mode: starting on :%d (sqlite=%s)", port, dbPath)
-	graceful.Run(fmt.Sprintf(":%d", port), 5*time.Second, app)
+	addr := fmt.Sprintf(":%d", port)
+
+	// Pre-bind the listener so we can surface a clean error if the port is
+	// in use. graceful.Run otherwise log.Fatals from a goroutine, which is
+	// hard to read.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("test-mode: cannot bind %s: %w (try --test-port=<n>)", addr, err)
+	}
+
+	log.INFO.Printf("test-mode: listening on %s (sqlite=%s)", addr, dbPath)
+
+	srv := &graceful.Server{
+		Timeout: 5 * time.Second,
+		Server:  &http.Server{Addr: addr, Handler: app},
+	}
+	if err := srv.Serve(ln); err != nil {
+		return fmt.Errorf("test-mode: server stopped: %w", err)
+	}
 	return nil
 }

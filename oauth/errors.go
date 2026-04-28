@@ -13,6 +13,7 @@ var (
 		ErrInvalidUsernameOrPassword:     http.StatusBadRequest,
 		ErrRefreshTokenNotFound:          http.StatusNotFound,
 		ErrRefreshTokenExpired:           http.StatusBadRequest,
+		ErrRefreshTokenRevoked:           http.StatusBadRequest,
 		ErrRequestedScopeCannotBeGreater: http.StatusBadRequest,
 		ErrTokenMissing:                  http.StatusNotFound,
 		ErrTokenHintInvalid:              http.StatusBadRequest,

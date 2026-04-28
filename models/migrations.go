@@ -13,6 +13,10 @@ var (
 			Name:     "initial",
 			Function: migrate0001,
 		},
+		{
+			Name:     "refresh_token_rotation",
+			Function: migrate0002,
+		},
 	}
 )
 
@@ -113,5 +117,16 @@ func migrate0001(db *gorm.DB, name string) error {
 			"oauth_authorization_codes.user_id for oauth_users(id): %s", err)
 	}
 
+	return nil
+}
+
+// migrate0002 adds the columns required for refresh-token rotation:
+// revoked_at and parent_id on oauth_refresh_tokens. AutoMigrate is
+// additive — it adds missing columns without touching existing data,
+// so this is safe to run against an existing prod database.
+func migrate0002(db *gorm.DB, name string) error {
+	if err := db.AutoMigrate(new(OauthRefreshToken)).Error; err != nil {
+		return fmt.Errorf("Error adding refresh-token rotation columns: %s", err)
+	}
 	return nil
 }

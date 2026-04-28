@@ -71,6 +71,14 @@ type OauthRefreshToken struct {
 	Token     string    `sql:"type:varchar(40);unique;not null"`
 	ExpiresAt time.Time `sql:"not null"`
 	Scope     string    `sql:"type:varchar(200);not null"`
+
+	// RevokedAt is set by refresh-token rotation (and later by RFC 7009
+	// revocation). A non-nil value means the token can no longer be used.
+	RevokedAt *time.Time `sql:"index"`
+
+	// ParentID points to the refresh token this one was rotated from, so
+	// reuse of an ancestor in the chain is detectable. Null on the root.
+	ParentID sql.NullString `sql:"type:varchar(36)"`
 }
 
 // TableName specifies table name

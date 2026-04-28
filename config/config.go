@@ -17,6 +17,13 @@ type OauthConfig struct {
 	AccessTokenLifetime  int
 	RefreshTokenLifetime int
 	AuthCodeLifetime     int
+
+	// RefreshTokenRotation, when true, issues a new refresh token on every
+	// `grant_type=refresh_token` exchange and revokes the prior one. The
+	// new token's parent_id links back to the prior token for chain
+	// inspection. Default off in production; the test-mode config sets it
+	// to true so harnesses can exercise rotation by default.
+	RefreshTokenRotation bool
 }
 
 // SessionConfig stores session configuration for the web app

@@ -19,6 +19,7 @@ func NewConfig(dbPath string) *config.Config {
 			AccessTokenLifetime:  3600,
 			RefreshTokenLifetime: 1209600,
 			AuthCodeLifetime:     3600,
+			RefreshTokenRotation: true, // tests usually want rotation; toggle via /test/refresh-tokens/rotate-policy
 		},
 		Session: config.SessionConfig{
 			Secret:   "test_secret",

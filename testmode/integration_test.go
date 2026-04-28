@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -616,6 +617,168 @@ func TestScriptQueue(t *testing.T) {
 		_, err := client.Do(req)
 		if err == nil {
 			t.Fatalf("expected connection error from drop_connection, got nil")
+		}
+	})
+}
+
+func TestRefreshTokenRotation(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	// Setup: client + user.
+	mustPostJSON(t, srv.URL+"/test/clients", map[string]string{
+		"key":          "rot-client",
+		"secret":       "rot-secret",
+		"redirect_uri": "https://x.example.com/cb",
+	})
+	mustPostJSON(t, srv.URL+"/test/users", map[string]string{
+		"username": "dave@example.com",
+		"password": "hunter22",
+	})
+
+	// Get an initial refresh token via password grant.
+	initialRefreshToken := func(t *testing.T) string {
+		t.Helper()
+		form := url.Values{}
+		form.Set("grant_type", "password")
+		form.Set("username", "dave@example.com")
+		form.Set("password", "hunter22")
+		form.Set("scope", "read")
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("rot-client", "rot-secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("password grant: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var tok struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		json.Unmarshal(body, &tok)
+		if tok.RefreshToken == "" {
+			t.Fatalf("expected refresh_token in response, got %s", body)
+		}
+		return tok.RefreshToken
+	}
+
+	doRefresh := func(t *testing.T, rt string) (status int, body []byte) {
+		t.Helper()
+		form := url.Values{}
+		form.Set("grant_type", "refresh_token")
+		form.Set("refresh_token", rt)
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("rot-client", "rot-secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("refresh: %v", err)
+		}
+		body, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, body
+	}
+
+	t.Run("rotation issues a new refresh token and revokes the old", func(t *testing.T) {
+		rt := initialRefreshToken(t)
+
+		status, body := doRefresh(t, rt)
+		if status != http.StatusOK {
+			t.Fatalf("first refresh expected 200 got %d body=%s", status, body)
+		}
+		var refreshResp struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+		}
+		json.Unmarshal(body, &refreshResp)
+		if refreshResp.RefreshToken == "" || refreshResp.RefreshToken == rt {
+			t.Fatalf("expected a new refresh token, got %q (was %q)", refreshResp.RefreshToken, rt)
+		}
+
+		// Replay the OLD refresh token: must fail (revoked).
+		status2, body2 := doRefresh(t, rt)
+		if status2 == http.StatusOK {
+			t.Fatalf("expected reuse of old refresh token to fail, got 200 body=%s", body2)
+		}
+		if status2 != http.StatusBadRequest {
+			t.Fatalf("expected 400 on revoked-token reuse, got %d body=%s", status2, body2)
+		}
+
+		// New refresh token still works.
+		status3, body3 := doRefresh(t, refreshResp.RefreshToken)
+		if status3 != http.StatusOK {
+			t.Fatalf("new refresh token should work, got %d body=%s", status3, body3)
+		}
+	})
+
+	t.Run("concurrent refresh: exactly one wins", func(t *testing.T) {
+		rt := initialRefreshToken(t)
+
+		const N = 8
+		var wg sync.WaitGroup
+		results := make([]int, N)
+		for i := 0; i < N; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				status, _ := doRefresh(t, rt)
+				results[i] = status
+			}(i)
+		}
+		wg.Wait()
+
+		ok, fail := 0, 0
+		for _, s := range results {
+			switch s {
+			case http.StatusOK:
+				ok++
+			case http.StatusBadRequest:
+				fail++
+			default:
+				t.Fatalf("unexpected status from concurrent refresh: %d", s)
+			}
+		}
+		if ok != 1 {
+			t.Fatalf("expected exactly 1 success across %d concurrent refreshes, got %d (results=%v)", N, ok, results)
+		}
+		if fail != N-1 {
+			t.Fatalf("expected %d failures, got %d (results=%v)", N-1, fail, results)
+		}
+	})
+
+	t.Run("rotate-policy off: legacy reuse behavior", func(t *testing.T) {
+		// Toggle rotation off.
+		buf, _ := json.Marshal(map[string]bool{"rotation": false})
+		resp, _ := http.Post(srv.URL+"/test/refresh-tokens/rotate-policy", "application/json", bytes.NewReader(buf))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 from rotate-policy, got %d", resp.StatusCode)
+		}
+		resp.Body.Close()
+		t.Cleanup(func() {
+			// Restore default for subsequent subtests.
+			b, _ := json.Marshal(map[string]bool{"rotation": true})
+			r, _ := http.Post(srv.URL+"/test/refresh-tokens/rotate-policy", "application/json", bytes.NewReader(b))
+			r.Body.Close()
+		})
+
+		rt := initialRefreshToken(t)
+		status, body := doRefresh(t, rt)
+		if status != http.StatusOK {
+			t.Fatalf("first refresh expected 200, got %d body=%s", status, body)
+		}
+		var refreshResp struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		json.Unmarshal(body, &refreshResp)
+		if refreshResp.RefreshToken != rt {
+			t.Fatalf("with rotation off, refresh token should be reused; got %q expected %q", refreshResp.RefreshToken, rt)
+		}
+
+		// Replay the same refresh token: must still succeed.
+		status2, body2 := doRefresh(t, rt)
+		if status2 != http.StatusOK {
+			t.Fatalf("with rotation off, reuse should succeed; got %d body=%s", status2, body2)
 		}
 	})
 }

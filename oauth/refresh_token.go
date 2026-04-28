@@ -13,6 +13,10 @@ var (
 	ErrRefreshTokenNotFound = errors.New("Refresh token not found")
 	// ErrRefreshTokenExpired ...
 	ErrRefreshTokenExpired = errors.New("Refresh token expired")
+	// ErrRefreshTokenRevoked is returned when a refresh token has been
+	// rotated or otherwise marked revoked. Maps to HTTP 400 (invalid_grant
+	// in OAuth terms).
+	ErrRefreshTokenRevoked = errors.New("Refresh token revoked")
 	// ErrRequestedScopeCannotBeGreater ...
 	ErrRequestedScopeCannotBeGreater = errors.New("Requested scope cannot be greater")
 )
@@ -20,9 +24,13 @@ var (
 // GetOrCreateRefreshToken retrieves an existing refresh token, if expired,
 // the token gets deleted and new refresh token is created
 func (s *Service) GetOrCreateRefreshToken(client *models.OauthClient, user *models.OauthUser, expiresIn int, scope string) (*models.OauthRefreshToken, error) {
-	// Try to fetch an existing refresh token first
+	// Try to fetch an existing refresh token first. Revoked tokens (from
+	// rotation or RFC 7009 revocation) are treated as not-found so a fresh
+	// token is issued.
 	refreshToken := new(models.OauthRefreshToken)
-	query := models.OauthRefreshTokenPreload(s.db).Where("client_id = ?", client.ID)
+	query := models.OauthRefreshTokenPreload(s.db).
+		Where("client_id = ?", client.ID).
+		Where("revoked_at IS NULL")
 	if user != nil && len([]rune(user.ID)) > 0 {
 		query = query.Where("user_id = ?", user.ID)
 	} else {
@@ -64,6 +72,12 @@ func (s *Service) GetValidRefreshToken(token string, client *models.OauthClient)
 	// Not found
 	if notFound {
 		return nil, ErrRefreshTokenNotFound
+	}
+
+	// Check the refresh token hasn't been revoked (e.g. by a prior rotation
+	// or RFC 7009 revocation).
+	if refreshToken.RevokedAt != nil {
+		return nil, ErrRefreshTokenRevoked
 	}
 
 	// Check the refresh token hasn't expired

@@ -62,5 +62,11 @@ func (s *Service) GetRoutes() []routes.Route {
 			Pattern:     "/scripts",
 			HandlerFunc: s.clearScripts,
 		},
+		{
+			Name:        "test_rotate_policy",
+			Method:      "POST",
+			Pattern:     "/refresh-tokens/rotate-policy",
+			HandlerFunc: s.rotatePolicy,
+		},
 	}
 }

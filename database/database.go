@@ -64,6 +64,12 @@ func NewDatabase(cnf *config.Config) (*gorm.DB, error) {
 			return db, err
 		}
 
+		// SQLite serializes writes anyway; with ":memory:" each pooled
+		// connection would also get its own private database, which makes
+		// concurrent test traffic see partial state. Cap the pool at 1 so
+		// every query lands on the same connection and the same DB.
+		db.DB().SetMaxOpenConns(1)
+
 		db.LogMode(cnf.IsDevelopment)
 		return db, nil
 	}

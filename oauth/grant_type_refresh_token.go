@@ -20,12 +20,20 @@ func (s *Service) refreshTokenGrant(r *http.Request, client *models.OauthClient)
 		return nil, err
 	}
 
-	// Log in the user
-	accessToken, refreshToken, err := s.Login(
-		theRefreshToken.Client,
-		theRefreshToken.User,
-		scope,
+	var (
+		accessToken  *models.OauthAccessToken
+		refreshToken *models.OauthRefreshToken
 	)
+	if s.cnf.Oauth.RefreshTokenRotation {
+		accessToken, refreshToken, err = s.rotateRefreshToken(theRefreshToken, scope)
+	} else {
+		// Legacy non-rotation path: reuses the existing refresh token.
+		accessToken, refreshToken, err = s.Login(
+			theRefreshToken.Client,
+			theRefreshToken.User,
+			scope,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}

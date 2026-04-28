@@ -11,6 +11,9 @@ import (
 var (
 	cliApp        *cli.App
 	configBackend string
+	testMode      bool
+	testDBPath    string
+	testPort      int
 )
 
 func init() {
@@ -31,6 +34,26 @@ func init() {
 }
 
 func main() {
+	runserverFlags := []cli.Flag{
+		cli.BoolFlag{
+			Name:        "test-mode",
+			Usage:       "run as a controllable test provider: use embedded SQLite, skip remote config, expose /test/* control plane",
+			Destination: &testMode,
+		},
+		cli.StringFlag{
+			Name:        "test-db-path",
+			Usage:       "path to SQLite database file (default: in-memory). Only used with --test-mode",
+			Value:       ":memory:",
+			Destination: &testDBPath,
+		},
+		cli.IntFlag{
+			Name:        "test-port",
+			Usage:       "port to bind in test mode",
+			Value:       8080,
+			Destination: &testPort,
+		},
+	}
+
 	// Set the CLI app commands
 	cliApp.Commands = []cli.Command{
 		{
@@ -50,7 +73,11 @@ func main() {
 		{
 			Name:  "runserver",
 			Usage: "run web server",
+			Flags: runserverFlags,
 			Action: func(c *cli.Context) error {
+				if testMode {
+					return cmd.RunTestServer(testDBPath, testPort)
+				}
 				return cmd.RunServer(configBackend)
 			},
 		},

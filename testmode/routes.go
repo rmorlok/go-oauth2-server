@@ -44,5 +44,23 @@ func (s *Service) GetRoutes() []routes.Route {
 			Pattern:     "/requests",
 			HandlerFunc: s.requestsHandler,
 		},
+		{
+			Name:        "test_enqueue_script",
+			Method:      "POST",
+			Pattern:     "/scripts",
+			HandlerFunc: s.enqueueScript,
+		},
+		{
+			Name:        "test_list_scripts",
+			Method:      "GET",
+			Pattern:     "/scripts",
+			HandlerFunc: s.listScripts,
+		},
+		{
+			Name:        "test_clear_scripts",
+			Method:      "DELETE",
+			Pattern:     "/scripts",
+			HandlerFunc: s.clearScripts,
+		},
 	}
 }

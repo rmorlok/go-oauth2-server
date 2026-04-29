@@ -105,6 +105,8 @@ func classifyEndpoint(path string, form url.Values) string {
 		return "introspect"
 	case path == "/v1/oauth/revoke":
 		return "revoke"
+	case path == "/v1/oauth/userinfo":
+		return "userinfo"
 	case path == "/test/resource" || strings.HasPrefix(path, "/test/resource/"):
 		return "resource"
 	default:

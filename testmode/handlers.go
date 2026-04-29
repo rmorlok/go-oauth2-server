@@ -6,6 +6,7 @@ import (
 
 	"github.com/RichardKnop/go-oauth2-server/log"
 	"github.com/RichardKnop/go-oauth2-server/oauth/roles"
+	"github.com/RichardKnop/go-oauth2-server/util"
 	"github.com/RichardKnop/go-oauth2-server/util/response"
 )
 
@@ -56,15 +57,21 @@ func (s *Service) createClient(w http.ResponseWriter, r *http.Request) {
 }
 
 type createUserRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Role     string `json:"role"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	Role        string `json:"role"`
+	Email       string `json:"email,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Sub         string `json:"sub,omitempty"`
 }
 
 type userResponse struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	Role        string `json:"role"`
+	Email       string `json:"email,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Sub         string `json:"sub,omitempty"`
 }
 
 func (s *Service) createUser(w http.ResponseWriter, r *http.Request) {
@@ -88,11 +95,40 @@ func (s *Service) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response.WriteJSON(w, userResponse{
+	// Apply identity attributes if any were supplied at creation time.
+	updates := map[string]interface{}{}
+	if req.Email != "" {
+		updates["email"] = util.StringOrNull(req.Email)
+	}
+	if req.DisplayName != "" {
+		updates["display_name"] = util.StringOrNull(req.DisplayName)
+	}
+	if req.Sub != "" {
+		updates["sub_override"] = util.StringOrNull(req.Sub)
+	}
+	if len(updates) > 0 {
+		if err := s.db.Model(user).Updates(updates).Error; err != nil {
+			response.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.db.Where("id = ?", user.ID).First(user)
+	}
+
+	resp := userResponse{
 		ID:       user.ID,
 		Username: user.Username,
 		Role:     user.RoleID.String,
-	}, http.StatusCreated)
+	}
+	if user.Email.Valid {
+		resp.Email = user.Email.String
+	}
+	if user.DisplayName.Valid {
+		resp.DisplayName = user.DisplayName.String
+	}
+	if user.SubOverride.Valid {
+		resp.Sub = user.SubOverride.String
+	}
+	response.WriteJSON(w, resp, http.StatusCreated)
 }
 
 func (s *Service) health(w http.ResponseWriter, r *http.Request) {

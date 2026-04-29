@@ -19,6 +19,7 @@ var validScriptEndpoints = map[string]struct{}{
 	"revoke":     {},
 	"resource":   {},
 	"introspect": {},
+	"userinfo":   {},
 }
 
 // enqueueScript implements POST /test/scripts.

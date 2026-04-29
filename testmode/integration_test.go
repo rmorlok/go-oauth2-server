@@ -1611,6 +1611,230 @@ func TestAuthMethodCompatibility(t *testing.T) {
 	})
 }
 
+func TestUserinfoAndIdentity(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	mustPostJSON(t, srv.URL+"/test/clients", map[string]string{
+		"key":          "ui-client",
+		"secret":       "ui-secret",
+		"redirect_uri": "https://app.example.com/cb",
+	})
+
+	// Create user with email and display name set up front.
+	userBody := mustPostJSON(t, srv.URL+"/test/users", map[string]string{
+		"username":     "henry@example.com",
+		"password":     "hunter22",
+		"email":        "henry@example.com",
+		"display_name": "Henry",
+	})
+	var user struct{ ID string `json:"id"` }
+	json.Unmarshal(userBody, &user)
+	if user.ID == "" {
+		t.Fatalf("expected user id in response: %s", userBody)
+	}
+
+	getToken := func(t *testing.T, scope string) string {
+		t.Helper()
+		form := url.Values{}
+		form.Set("grant_type", "password")
+		form.Set("username", "henry@example.com")
+		form.Set("password", "hunter22")
+		form.Set("scope", scope)
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("ui-client", "ui-secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("token: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var tok struct{ AccessToken string `json:"access_token"` }
+		json.Unmarshal(body, &tok)
+		if tok.AccessToken == "" {
+			t.Fatalf("no access token: %s", body)
+		}
+		return tok.AccessToken
+	}
+
+	getUserinfo := func(t *testing.T, token string) (int, http.Header, []byte) {
+		t.Helper()
+		req, _ := http.NewRequest("GET", srv.URL+"/v1/oauth/userinfo", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("userinfo: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, resp.Header, body
+	}
+
+	t.Run("token with profile scope returns sub/email/name", func(t *testing.T) {
+		at := getToken(t, "profile email")
+		status, _, body := getUserinfo(t, at)
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", status, body)
+		}
+		var ui struct {
+			Sub               string `json:"sub"`
+			Email             string `json:"email"`
+			PreferredUsername string `json:"preferred_username"`
+			Name              string `json:"name"`
+		}
+		json.Unmarshal(body, &ui)
+		if ui.Sub != user.ID {
+			t.Fatalf("expected sub=%s, got %q", user.ID, ui.Sub)
+		}
+		if ui.Email != "henry@example.com" {
+			t.Fatalf("expected email henry@example.com, got %q", ui.Email)
+		}
+		if ui.Name != "Henry" {
+			t.Fatalf("expected name Henry, got %q", ui.Name)
+		}
+		if ui.PreferredUsername != "henry@example.com" {
+			t.Fatalf("expected preferred_username henry@example.com, got %q", ui.PreferredUsername)
+		}
+	})
+
+	t.Run("missing bearer returns 401 with WWW-Authenticate", func(t *testing.T) {
+		status, hdr, _ := getUserinfo(t, "")
+		if status != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", status)
+		}
+		if !strings.Contains(hdr.Get("WWW-Authenticate"), `error="invalid_token"`) {
+			t.Fatalf("expected invalid_token WWW-Authenticate, got %q", hdr.Get("WWW-Authenticate"))
+		}
+	})
+
+	t.Run("token without profile/email scope returns 403", func(t *testing.T) {
+		at := getToken(t, "read")
+		status, hdr, body := getUserinfo(t, at)
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d body=%s", status, body)
+		}
+		if !strings.Contains(hdr.Get("WWW-Authenticate"), `error="insufficient_scope"`) {
+			t.Fatalf("expected insufficient_scope, got %q", hdr.Get("WWW-Authenticate"))
+		}
+	})
+
+	t.Run("client_credentials token has no user, returns 403", func(t *testing.T) {
+		form := url.Values{}
+		form.Set("grant_type", "client_credentials")
+		form.Set("scope", "profile")
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("ui-client", "ui-secret")
+		resp, _ := http.DefaultClient.Do(req)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var tok struct{ AccessToken string `json:"access_token"` }
+		json.Unmarshal(body, &tok)
+		if tok.AccessToken == "" {
+			t.Fatalf("expected access_token: %s", body)
+		}
+		status, _, _ := getUserinfo(t, tok.AccessToken)
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403 for client-credentials token, got %d", status)
+		}
+	})
+
+	t.Run("identity update mutates email visible in next userinfo call", func(t *testing.T) {
+		// Existing token before mutation.
+		at := getToken(t, "profile email")
+
+		buf, _ := json.Marshal(map[string]string{"email": "henry+new@example.com"})
+		resp, _ := http.Post(srv.URL+"/test/users/"+user.ID+"/identity", "application/json", bytes.NewReader(buf))
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("identity update expected 200, got %d body=%s", resp.StatusCode, body)
+		}
+
+		// Same token, new userinfo response.
+		_, _, ui := getUserinfo(t, at)
+		var resp2 struct{ Email string }
+		json.Unmarshal(ui, &resp2)
+		if resp2.Email != "henry+new@example.com" {
+			t.Fatalf("expected new email visible to existing token, got %q (body=%s)", resp2.Email, ui)
+		}
+	})
+
+	t.Run("swap-subject changes sub returned by userinfo", func(t *testing.T) {
+		at := getToken(t, "profile")
+		buf, _ := json.Marshal(map[string]string{"new_sub": "iss://example/users/42"})
+		resp, _ := http.Post(srv.URL+"/test/users/"+user.ID+"/swap-subject", "application/json", bytes.NewReader(buf))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("swap-subject expected 200, got %d", resp.StatusCode)
+		}
+
+		_, _, body := getUserinfo(t, at)
+		var ui struct{ Sub string }
+		json.Unmarshal(body, &ui)
+		if ui.Sub != "iss://example/users/42" {
+			t.Fatalf("expected sub override, got %q (body=%s)", ui.Sub, body)
+		}
+
+		// Clear the override and confirm sub falls back to UUID.
+		buf2, _ := json.Marshal(map[string]string{"new_sub": ""})
+		resp2, _ := http.Post(srv.URL+"/test/users/"+user.ID+"/swap-subject", "application/json", bytes.NewReader(buf2))
+		resp2.Body.Close()
+		_, _, body2 := getUserinfo(t, at)
+		var ui2 struct{ Sub string }
+		json.Unmarshal(body2, &ui2)
+		if ui2.Sub != user.ID {
+			t.Fatalf("expected sub to fall back to UUID, got %q", ui2.Sub)
+		}
+	})
+
+	t.Run("identity update on unknown user returns 404", func(t *testing.T) {
+		buf, _ := json.Marshal(map[string]string{"email": "x"})
+		resp, _ := http.Post(srv.URL+"/test/users/00000000-0000-0000-0000-000000000000/identity", "application/json", bytes.NewReader(buf))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("revoked access token at userinfo returns 401", func(t *testing.T) {
+		at := getToken(t, "profile")
+		// Revoke via test-mode admin endpoint.
+		buf, _ := json.Marshal(map[string]string{"token": at})
+		resp, _ := http.Post(srv.URL+"/test/revoke", "application/json", bytes.NewReader(buf))
+		resp.Body.Close()
+		status, _, _ := getUserinfo(t, at)
+		if status != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for revoked token at userinfo, got %d", status)
+		}
+	})
+
+	t.Run("userinfo is recordable and scriptable", func(t *testing.T) {
+		app.recorder.Reset()
+		// Script a 503 on userinfo.
+		buf, _ := json.Marshal(map[string]any{
+			"endpoint": "userinfo",
+			"actions":  []map[string]any{{"body_template": "temporarily_unavailable_503"}},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		at := getToken(t, "profile")
+		status, _, _ := getUserinfo(t, at)
+		if status != http.StatusServiceUnavailable {
+			t.Fatalf("expected scripted 503, got %d", status)
+		}
+		// Real call after queue empties is recorded.
+		getUserinfo(t, at)
+		entries := app.recorder.Snapshot(testmode.SnapshotFilter{Endpoint: "userinfo"})
+		if len(entries) == 0 {
+			t.Fatalf("expected recorded userinfo request")
+		}
+	})
+}
+
 func mustGet(t *testing.T, u string) *http.Response {
 	t.Helper()
 	resp, err := http.Get(u)

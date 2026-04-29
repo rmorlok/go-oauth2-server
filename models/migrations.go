@@ -29,6 +29,10 @@ var (
 			Name:     "client_auth_method",
 			Function: migrate0005,
 		},
+		{
+			Name:     "user_identity_columns",
+			Function: migrate0006,
+		},
 	}
 )
 
@@ -167,6 +171,16 @@ func migrate0004(db *gorm.DB, name string) error {
 func migrate0005(db *gorm.DB, name string) error {
 	if err := db.AutoMigrate(new(OauthClient)).Error; err != nil {
 		return fmt.Errorf("Error adding token_endpoint_auth_method column: %s", err)
+	}
+	return nil
+}
+
+// migrate0006 adds the identity columns (email, display_name, sub_override)
+// to oauth_users so /v1/oauth/userinfo can return profile/email claims and
+// test-mode can simulate identity changes between authorizations.
+func migrate0006(db *gorm.DB, name string) error {
+	if err := db.AutoMigrate(new(OauthUser)).Error; err != nil {
+		return fmt.Errorf("Error adding user identity columns: %s", err)
 	}
 	return nil
 }

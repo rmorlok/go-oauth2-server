@@ -24,6 +24,7 @@ import (
 type testApp struct {
 	server   *httptest.Server
 	recorder *testmode.Recorder
+	oauth    *oauth.Service
 }
 
 func newTestApp(t *testing.T, withTestMode bool) *testApp {
@@ -58,12 +59,16 @@ func newTestApp(t *testing.T, withTestMode bool) *testApp {
 		app.Use(ts.ScriptMiddleware())
 		ts.RegisterRoutes(router, "/test")
 		rec = ts.Recorder()
+	} else {
+		// Mirror cmd/run_server.go: production also mounts the sample
+		// protected resource so manual OAuth-flow validation works.
+		oauthService.RegisterSampleResource(router, "/test/resource")
 	}
 	app.UseHandler(router)
 
 	srv := httptest.NewServer(app)
 	t.Cleanup(srv.Close)
-	return &testApp{server: srv, recorder: rec}
+	return &testApp{server: srv, recorder: rec, oauth: oauthService}
 }
 
 func TestTestModeBootstrap(t *testing.T) {
@@ -166,6 +171,83 @@ func TestProductionModeOmitsTestRoutes(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 when test-mode is off, got %d", resp.StatusCode)
 	}
+}
+
+// TestProductionSampleResource verifies that /test/resource/{path} is
+// available outside of --test-mode for manual OAuth-flow validation.
+// The control-plane endpoints (/test/clients, /test/resource-policy,
+// /test/scripts, etc.) remain test-mode-only.
+func TestProductionSampleResource(t *testing.T) {
+	app := newTestApp(t, false)
+	srv := app.server
+
+	// No /test/clients in production — register the client directly.
+	if _, err := app.oauth.CreateClient("prod-c", "prod-s", "https://x/cb", "", false); err != nil {
+		t.Fatalf("CreateClient: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("grant_type", "client_credentials")
+	form.Set("scope", "read")
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth("prod-c", "prod-s")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("token expected 200, got %d body=%s", resp.StatusCode, body)
+	}
+	var tok struct{ AccessToken string `json:"access_token"` }
+	json.Unmarshal(body, &tok)
+	if tok.AccessToken == "" {
+		t.Fatalf("no access token: %s", body)
+	}
+
+	t.Run("valid bearer returns 200 with default body", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", srv.URL+"/test/resource/foo", nil)
+		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		body, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", r.StatusCode, body)
+		}
+		var doc map[string]any
+		json.Unmarshal(body, &doc)
+		if doc["path"] != "/test/resource/foo" || doc["scope"] != "read" {
+			t.Fatalf("unexpected body %s", body)
+		}
+	})
+
+	t.Run("missing bearer returns 401", func(t *testing.T) {
+		r, _ := http.Get(srv.URL + "/test/resource/foo")
+		r.Body.Close()
+		if r.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", r.StatusCode)
+		}
+		if !strings.Contains(r.Header.Get("WWW-Authenticate"), `error="invalid_token"`) {
+			t.Fatalf("expected invalid_token, got %q", r.Header.Get("WWW-Authenticate"))
+		}
+	})
+
+	t.Run("control-plane endpoints stay 404 in production", func(t *testing.T) {
+		// /test/health, /test/clients, /test/scripts, /test/resource-policy
+		// are all testmode-only.
+		for _, path := range []string{"/test/health", "/test/clients", "/test/scripts", "/test/resource-policy"} {
+			r, _ := http.Get(srv.URL + path)
+			r.Body.Close()
+			if r.StatusCode != http.StatusNotFound && r.StatusCode != http.StatusMethodNotAllowed {
+				t.Fatalf("expected 404/405 for %s in production, got %d", path, r.StatusCode)
+			}
+		}
+	})
 }
 
 func TestProgrammaticAuthorize(t *testing.T) {

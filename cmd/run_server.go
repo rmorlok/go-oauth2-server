@@ -40,6 +40,12 @@ func RunServer(configBackend string) error {
 	services.OauthService.RegisterRoutes(router, "/v1/oauth")
 	services.WebService.RegisterRoutes(router, "/web")
 
+	// /test/resource/{path} is a sample protected resource intended for
+	// manual OAuth-flow validation against this server: register a client,
+	// get a token, hit it with `Authorization: Bearer <token>`. No script
+	// queue, no recorder, no scope policy — those live in --test-mode.
+	services.OauthService.RegisterSampleResource(router, "/test/resource")
+
 	// Set the router
 	app.UseHandler(router)
 

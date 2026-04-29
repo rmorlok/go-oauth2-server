@@ -12,6 +12,8 @@ const (
 	introspectPath     = "/" + introspectResource
 	revokeResource     = "revoke"
 	revokePath         = "/" + revokeResource
+	userinfoResource   = "userinfo"
+	userinfoPath       = "/" + userinfoResource
 )
 
 // RegisterRoutes registers route handlers for the oauth service
@@ -40,6 +42,18 @@ func (s *Service) GetRoutes() []routes.Route {
 			Method:      "POST",
 			Pattern:     revokePath,
 			HandlerFunc: s.revokeHandler,
+		},
+		{
+			Name:        "oauth_userinfo_get",
+			Method:      "GET",
+			Pattern:     userinfoPath,
+			HandlerFunc: s.userinfoHandler,
+		},
+		{
+			Name:        "oauth_userinfo_post",
+			Method:      "POST",
+			Pattern:     userinfoPath,
+			HandlerFunc: s.userinfoHandler,
 		},
 	}
 }

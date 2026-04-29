@@ -84,5 +84,17 @@ func (s *Service) GetRoutes() []routes.Route {
 			Pattern:     "/resource-policy",
 			HandlerFunc: s.resourcePolicyHandler,
 		},
+		{
+			Name:        "test_user_identity",
+			Method:      "POST",
+			Pattern:     "/users/{id}/identity",
+			HandlerFunc: s.updateIdentity,
+		},
+		{
+			Name:        "test_user_swap_subject",
+			Method:      "POST",
+			Pattern:     "/users/{id}/swap-subject",
+			HandlerFunc: s.swapSubject,
+		},
 	}
 }

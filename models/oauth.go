@@ -60,6 +60,13 @@ type OauthUser struct {
 	Role     *OauthRole
 	Username string         `sql:"type:varchar(254);unique;not null"`
 	Password sql.NullString `sql:"type:varchar(60)"`
+
+	// Identity attributes returned by /v1/oauth/userinfo. All optional;
+	// when SubOverride is null/empty, userinfo falls back to the user's
+	// UUID for `sub`.
+	Email       sql.NullString `sql:"type:varchar(254)"`
+	DisplayName sql.NullString `sql:"type:varchar(254)"`
+	SubOverride sql.NullString `sql:"type:varchar(254)"`
 }
 
 // TableName specifies table name

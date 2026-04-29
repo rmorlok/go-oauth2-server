@@ -27,6 +27,8 @@ func Seed(db *gorm.DB) error {
 	defaultScopes := []models.OauthScope{
 		{MyGormModel: models.MyGormModel{ID: "1", CreatedAt: now}, Scope: "read", IsDefault: true},
 		{MyGormModel: models.MyGormModel{ID: "2", CreatedAt: now}, Scope: "read_write", IsDefault: false},
+		{MyGormModel: models.MyGormModel{ID: "3", CreatedAt: now}, Scope: "profile", IsDefault: false},
+		{MyGormModel: models.MyGormModel{ID: "4", CreatedAt: now}, Scope: "email", IsDefault: false},
 	}
 	for i := range defaultScopes {
 		sc := defaultScopes[i]

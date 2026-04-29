@@ -21,6 +21,15 @@ type OauthClient struct {
 	// Empty string is treated as the default for backwards compatibility
 	// with rows created before this column existed.
 	TokenEndpointAuthMethod string `sql:"type:varchar(32);default:'client_secret_basic'"`
+
+	// RequirePKCE turns on strict PKCE for this client:
+	//   - GrantAuthorizationCode rejects requests without a code_challenge
+	//   - the token endpoint rejects spurious verifiers (verifier sent
+	//     when the auth code has no stored challenge), instead of the
+	//     RFC §4.5 lax behavior.
+	// `none` (public) clients have this set to true automatically at
+	// creation time.
+	RequirePKCE bool `sql:"default:false"`
 }
 
 // TableName specifies table name

@@ -28,6 +28,12 @@ var (
 	// ErrPKCEVerifierMismatch is returned when the supplied code_verifier
 	// fails the challenge check.
 	ErrPKCEVerifierMismatch = errors.New("code_verifier does not match challenge")
+	// ErrPKCEVerifierUnexpected is returned when a strict-PKCE client
+	// (RequirePKCE=true) sends a code_verifier against an authorization
+	// code that has no stored challenge. RFC §4.5 permits ignoring this,
+	// but tests asserting against a misbehaving proxy may want the
+	// failure surfaced — that's what RequirePKCE turns on.
+	ErrPKCEVerifierUnexpected = errors.New("code_verifier sent but no challenge stored")
 )
 
 // pkceSkipKey is the context key used by test-mode scripting to mark a
@@ -70,11 +76,15 @@ func validateChallengeAtAuthorize(challenge, method string) (string, error) {
 // verifyPKCE checks the supplied verifier against the stored challenge.
 // Returns nil if the auth code has no challenge stored (no PKCE was
 // requested) or if the verifier matches.
-func verifyPKCE(code *models.OauthAuthorizationCode, verifier string) error {
+//
+// Strict mode (client.RequirePKCE = true) additionally rejects spurious
+// verifiers — i.e. a verifier sent against a code that has no stored
+// challenge. Lax mode follows RFC §4.5 and ignores them.
+func verifyPKCE(code *models.OauthAuthorizationCode, verifier string, client *models.OauthClient) error {
 	if !code.CodeChallenge.Valid || code.CodeChallenge.String == "" {
-		// No challenge stored — RFC §4.5: spurious verifier is permitted
-		// and ignored. (Strict-rejection mode would belong on a future
-		// per-client setting.)
+		if client != nil && client.RequirePKCE && verifier != "" {
+			return ErrPKCEVerifierUnexpected
+		}
 		return nil
 	}
 	if verifier == "" {

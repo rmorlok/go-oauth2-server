@@ -23,6 +23,8 @@ var (
 		ErrPKCEMethodUnsupported:         http.StatusBadRequest,
 		ErrPKCEVerifierMissing:           http.StatusBadRequest,
 		ErrPKCEVerifierMismatch:          http.StatusBadRequest,
+		ErrPKCEVerifierUnexpected:        http.StatusBadRequest,
+		ErrClientRequiresPKCE:            http.StatusBadRequest,
 		ErrRefreshTokenNotFound:          http.StatusNotFound,
 		ErrTokenMissing:                  http.StatusBadRequest,
 		ErrTokenHintInvalid:              http.StatusBadRequest,

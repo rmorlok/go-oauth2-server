@@ -15,9 +15,11 @@ type createClientRequest struct {
 	Secret      string `json:"secret"`
 	RedirectURI string `json:"redirect_uri"`
 
-	// Accepted but not yet enforced; reserved for PR-3 / PR-8.
-	Scope                   string `json:"scope,omitempty"`
+	// Accepted but not yet enforced; reserved for PR-3.
+	Scope string `json:"scope,omitempty"`
+
 	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method,omitempty"`
+	RequirePKCE             bool   `json:"require_pkce,omitempty"`
 }
 
 type clientResponse struct {
@@ -25,6 +27,7 @@ type clientResponse struct {
 	Key                     string `json:"key"`
 	RedirectURI             string `json:"redirect_uri,omitempty"`
 	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method,omitempty"`
+	RequirePKCE             bool   `json:"require_pkce,omitempty"`
 }
 
 func (s *Service) createClient(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +45,7 @@ func (s *Service) createClient(w http.ResponseWriter, r *http.Request) {
 			req.Scope)
 	}
 
-	client, err := s.oauthService.CreateClient(req.Key, req.Secret, req.RedirectURI, req.TokenEndpointAuthMethod)
+	client, err := s.oauthService.CreateClient(req.Key, req.Secret, req.RedirectURI, req.TokenEndpointAuthMethod, req.RequirePKCE)
 	if err != nil {
 		response.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -53,6 +56,7 @@ func (s *Service) createClient(w http.ResponseWriter, r *http.Request) {
 		Key:                     client.Key,
 		RedirectURI:             client.RedirectURI.String,
 		TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
+		RequirePKCE:             client.RequirePKCE,
 	}, http.StatusCreated)
 }
 

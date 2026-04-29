@@ -48,13 +48,17 @@ func (s *Service) FindClientByClientID(clientID string) (*models.OauthClient, er
 // CreateClient saves a new client to database. tokenEndpointAuthMethod
 // must be one of "client_secret_basic" (default), "client_secret_post",
 // "none", or empty (treated as the default).
-func (s *Service) CreateClient(clientID, secret, redirectURI, tokenEndpointAuthMethod string) (*models.OauthClient, error) {
-	return s.createClientCommon(s.db, clientID, secret, redirectURI, tokenEndpointAuthMethod)
+//
+// requirePKCE forces strict PKCE for the client (mandatory code_challenge
+// at authorize time, no spurious verifier accepted at the token endpoint).
+// `none` clients always get strict PKCE regardless of this argument.
+func (s *Service) CreateClient(clientID, secret, redirectURI, tokenEndpointAuthMethod string, requirePKCE bool) (*models.OauthClient, error) {
+	return s.createClientCommon(s.db, clientID, secret, redirectURI, tokenEndpointAuthMethod, requirePKCE)
 }
 
 // CreateClientTx saves a new client to database using injected db object.
-func (s *Service) CreateClientTx(tx *gorm.DB, clientID, secret, redirectURI, tokenEndpointAuthMethod string) (*models.OauthClient, error) {
-	return s.createClientCommon(tx, clientID, secret, redirectURI, tokenEndpointAuthMethod)
+func (s *Service) CreateClientTx(tx *gorm.DB, clientID, secret, redirectURI, tokenEndpointAuthMethod string, requirePKCE bool) (*models.OauthClient, error) {
+	return s.createClientCommon(tx, clientID, secret, redirectURI, tokenEndpointAuthMethod, requirePKCE)
 }
 
 // AuthClient authenticates client
@@ -73,7 +77,7 @@ func (s *Service) AuthClient(clientID, secret string) (*models.OauthClient, erro
 	return client, nil
 }
 
-func (s *Service) createClientCommon(db *gorm.DB, clientID, secret, redirectURI, tokenEndpointAuthMethod string) (*models.OauthClient, error) {
+func (s *Service) createClientCommon(db *gorm.DB, clientID, secret, redirectURI, tokenEndpointAuthMethod string, requirePKCE bool) (*models.OauthClient, error) {
 	// Check client ID
 	if s.ClientExists(clientID) {
 		return nil, ErrClientIDTaken
@@ -98,6 +102,11 @@ func (s *Service) createClientCommon(db *gorm.DB, clientID, secret, redirectURI,
 		}
 	}
 
+	// Public clients always require PKCE.
+	if method == AuthMethodNone {
+		requirePKCE = true
+	}
+
 	client := &models.OauthClient{
 		MyGormModel: models.MyGormModel{
 			ID:        uuid.New(),
@@ -107,6 +116,7 @@ func (s *Service) createClientCommon(db *gorm.DB, clientID, secret, redirectURI,
 		Secret:                  string(secretHash),
 		RedirectURI:             util.StringOrNull(redirectURI),
 		TokenEndpointAuthMethod: method,
+		RequirePKCE:             requirePKCE,
 	}
 	if err := db.Create(client).Error; err != nil {
 		return nil, err

@@ -118,6 +118,12 @@ type OauthAuthorizationCode struct {
 	RedirectURI sql.NullString `sql:"type:varchar(200)"`
 	ExpiresAt   time.Time      `sql:"not null"`
 	Scope       string         `sql:"type:varchar(200);not null"`
+
+	// PKCE (RFC 7636). Populated by the authorize step when the client
+	// supplies a challenge; consulted at /v1/oauth/tokens to verify the
+	// code_verifier the same client presents.
+	CodeChallenge       sql.NullString `sql:"type:varchar(128)"`
+	CodeChallengeMethod sql.NullString `sql:"type:varchar(10)"`
 }
 
 // TableName specifies table name

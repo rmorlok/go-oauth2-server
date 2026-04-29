@@ -61,6 +61,10 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request) {
 
 	// When response_type == "code", we will grant an authorization code
 	if responseType == "code" {
+		// PKCE parameters from the original /web/authorize request (RFC 7636).
+		codeChallenge := r.Form.Get("code_challenge")
+		codeChallengeMethod := r.Form.Get("code_challenge_method")
+
 		// Create a new authorization code
 		authorizationCode, err := s.oauthService.GrantAuthorizationCode(
 			client,                       // client
@@ -68,6 +72,8 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request) {
 			s.cnf.Oauth.AuthCodeLifetime, // expires in
 			redirectURI.String(),         // redirect URI
 			scope,                        // scope
+			codeChallenge,                // code_challenge (RFC 7636)
+			codeChallengeMethod,          // code_challenge_method
 		)
 		if err != nil {
 			errorRedirect(w, r, redirectURI, "server_error", state, responseType)

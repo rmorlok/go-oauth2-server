@@ -24,6 +24,14 @@ func (s *Service) authorizationCodeGrant(r *http.Request, client *models.OauthCl
 		return nil, err
 	}
 
+	// PKCE verification (RFC 7636). The skip path is reserved for the
+	// test-mode script middleware's skip_pkce_check action.
+	if !skipPKCE(r.Context()) {
+		if err := verifyPKCE(authorizationCode, r.Form.Get("code_verifier")); err != nil {
+			return nil, err
+		}
+	}
+
 	// Log in the user
 	accessToken, refreshToken, err := s.Login(
 		authorizationCode.Client,

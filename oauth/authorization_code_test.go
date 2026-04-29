@@ -19,6 +19,8 @@ func (suite *OauthTestSuite) TestGrantAuthorizationCode() {
 		3600,                          // expires in
 		"redirect URI doesn't matter", // redirect URI
 		"scope doesn't matter",        // scope
+		"",                            // code_challenge (no PKCE)
+		"",                            // code_challenge_method
 	)
 
 	// Error should be Nil

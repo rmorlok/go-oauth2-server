@@ -18,6 +18,7 @@ var (
 		ErrTokenMissing:                  http.StatusNotFound,
 		ErrTokenHintInvalid:              http.StatusBadRequest,
 		ErrAccessTokenNotFound:           http.StatusNotFound,
+		ErrAccessTokenRevoked:            http.StatusUnauthorized,
 		ErrRefreshTokenNotFound:          http.StatusNotFound,
 		ErrTokenMissing:                  http.StatusBadRequest,
 		ErrTokenHintInvalid:              http.StatusBadRequest,

@@ -783,6 +783,219 @@ func TestRefreshTokenRotation(t *testing.T) {
 	})
 }
 
+func TestTokenRevocation(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	mustPostJSON(t, srv.URL+"/test/clients", map[string]string{
+		"key":          "rev-client",
+		"secret":       "rev-secret",
+		"redirect_uri": "https://x.example.com/cb",
+	})
+	mustPostJSON(t, srv.URL+"/test/clients", map[string]string{
+		"key":          "other-client",
+		"secret":       "other-secret",
+		"redirect_uri": "https://x.example.com/cb",
+	})
+	mustPostJSON(t, srv.URL+"/test/users", map[string]string{
+		"username": "frank@example.com",
+		"password": "hunter22",
+	})
+
+	passwordGrant := func(t *testing.T, clientKey, clientSecret string) (access, refresh string) {
+		t.Helper()
+		form := url.Values{}
+		form.Set("grant_type", "password")
+		form.Set("username", "frank@example.com")
+		form.Set("password", "hunter22")
+		form.Set("scope", "read")
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth(clientKey, clientSecret)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("password grant: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var tok struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+		}
+		json.Unmarshal(body, &tok)
+		return tok.AccessToken, tok.RefreshToken
+	}
+
+	revoke := func(t *testing.T, clientKey, clientSecret, tok, hint string) (status int, body []byte) {
+		t.Helper()
+		form := url.Values{}
+		form.Set("token", tok)
+		if hint != "" {
+			form.Set("token_type_hint", hint)
+		}
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth(clientKey, clientSecret)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("revoke: %v", err)
+		}
+		body, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, body
+	}
+
+	introspect := func(t *testing.T, clientKey, clientSecret, tok, hint string) (status int) {
+		t.Helper()
+		form := url.Values{}
+		form.Set("token", tok)
+		if hint != "" {
+			form.Set("token_type_hint", hint)
+		}
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/introspect", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth(clientKey, clientSecret)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("introspect: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	t.Run("revoke access token then introspect returns invalid", func(t *testing.T) {
+		at, _ := passwordGrant(t, "rev-client", "rev-secret")
+		status, body := revoke(t, "rev-client", "rev-secret", at, "access_token")
+		if status != http.StatusOK {
+			t.Fatalf("revoke expected 200, got %d body=%s", status, body)
+		}
+		if introspect(t, "rev-client", "rev-secret", at, "access_token") == http.StatusOK {
+			t.Fatalf("introspect of revoked access token should not be 200")
+		}
+	})
+
+	t.Run("revoke refresh token also kills access tokens for the same user/client", func(t *testing.T) {
+		at, rt := passwordGrant(t, "rev-client", "rev-secret")
+		status, body := revoke(t, "rev-client", "rev-secret", rt, "refresh_token")
+		if status != http.StatusOK {
+			t.Fatalf("revoke expected 200, got %d body=%s", status, body)
+		}
+		// Refresh-grant with the revoked refresh token must fail.
+		form := url.Values{}
+		form.Set("grant_type", "refresh_token")
+		form.Set("refresh_token", rt)
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("rev-client", "rev-secret")
+		resp, _ := http.DefaultClient.Do(req)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			t.Fatalf("refresh of revoked RT should not succeed, got 200")
+		}
+		// Cascaded access token must also be invalid.
+		if introspect(t, "rev-client", "rev-secret", at, "access_token") == http.StatusOK {
+			t.Fatalf("cascaded access token should be invalid after refresh revocation")
+		}
+	})
+
+	t.Run("unknown token returns 200", func(t *testing.T) {
+		status, body := revoke(t, "rev-client", "rev-secret", "00000000-0000-0000-0000-000000000000", "")
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 for unknown token, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("token belonging to other client returns 200 but is NOT revoked", func(t *testing.T) {
+		at, _ := passwordGrant(t, "other-client", "other-secret")
+		// rev-client tries to revoke other-client's access token.
+		status, _ := revoke(t, "rev-client", "rev-secret", at, "access_token")
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 for cross-client revoke, got %d", status)
+		}
+		// Token should still work when its real owner introspects.
+		if introspect(t, "other-client", "other-secret", at, "access_token") != http.StatusOK {
+			t.Fatalf("token should still be valid for owning client")
+		}
+	})
+
+	t.Run("missing client auth returns 401", func(t *testing.T) {
+		form := url.Values{}
+		form.Set("token", "anything")
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, _ := http.DefaultClient.Do(req)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", resp.StatusCode)
+		}
+		if got := resp.Header.Get("WWW-Authenticate"); got == "" {
+			t.Fatalf("expected WWW-Authenticate header on 401")
+		}
+	})
+
+	t.Run("unsupported token_type_hint returns 400", func(t *testing.T) {
+		status, _ := revoke(t, "rev-client", "rev-secret", "x", "bogus")
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", status)
+		}
+	})
+
+	t.Run("/test/revoke by token bypasses ownership", func(t *testing.T) {
+		at, _ := passwordGrant(t, "other-client", "other-secret")
+		buf, _ := json.Marshal(map[string]string{"token": at})
+		resp, _ := http.Post(srv.URL+"/test/revoke", "application/json", bytes.NewReader(buf))
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("/test/revoke expected 200, got %d body=%s", resp.StatusCode, body)
+		}
+		var rr struct{ Found bool }
+		json.Unmarshal(body, &rr)
+		if !rr.Found {
+			t.Fatalf("expected found=true, got %s", body)
+		}
+		if introspect(t, "other-client", "other-secret", at, "access_token") == http.StatusOK {
+			t.Fatalf("token should be invalid after /test/revoke")
+		}
+	})
+
+	t.Run("/test/revoke by client_id (key) revokes everything for that client", func(t *testing.T) {
+		at, _ := passwordGrant(t, "other-client", "other-secret")
+		buf, _ := json.Marshal(map[string]string{"client_id": "other-client"})
+		resp, _ := http.Post(srv.URL+"/test/revoke", "application/json", bytes.NewReader(buf))
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("/test/revoke expected 200, got %d body=%s", resp.StatusCode, body)
+		}
+		if introspect(t, "other-client", "other-secret", at, "access_token") == http.StatusOK {
+			t.Fatalf("token should be invalid after client-wide revoke")
+		}
+	})
+
+	t.Run("revoke endpoint is recordable and scriptable", func(t *testing.T) {
+		// Script a 503 on the revoke endpoint.
+		buf, _ := json.Marshal(map[string]any{
+			"client_id": "rev-client",
+			"endpoint":  "revoke",
+			"actions":   []map[string]any{{"body_template": "temporarily_unavailable_503"}},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		status, _ := revoke(t, "rev-client", "rev-secret", "anything", "")
+		if status != http.StatusServiceUnavailable {
+			t.Fatalf("expected scripted 503, got %d", status)
+		}
+
+		// Real revoke calls (after queue empties) also show up in /test/requests.
+		revoke(t, "rev-client", "rev-secret", "x", "")
+		entries := app.recorder.Snapshot(testmode.SnapshotFilter{Endpoint: "revoke"})
+		if len(entries) == 0 {
+			t.Fatalf("expected at least one recorded revoke request")
+		}
+	})
+}
+
 func mustGet(t *testing.T, u string) *http.Response {
 	t.Helper()
 	resp, err := http.Get(u)

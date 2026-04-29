@@ -68,5 +68,11 @@ func (s *Service) GetRoutes() []routes.Route {
 			Pattern:     "/refresh-tokens/rotate-policy",
 			HandlerFunc: s.rotatePolicy,
 		},
+		{
+			Name:        "test_admin_revoke",
+			Method:      "POST",
+			Pattern:     "/revoke",
+			HandlerFunc: s.adminRevoke,
+		},
 	}
 }

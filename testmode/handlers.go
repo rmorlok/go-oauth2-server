@@ -20,9 +20,10 @@ type createClientRequest struct {
 }
 
 type clientResponse struct {
-	ID          string `json:"id"`
-	Key         string `json:"key"`
-	RedirectURI string `json:"redirect_uri,omitempty"`
+	ID                      string `json:"id"`
+	Key                     string `json:"key"`
+	RedirectURI             string `json:"redirect_uri,omitempty"`
+	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method,omitempty"`
 }
 
 func (s *Service) createClient(w http.ResponseWriter, r *http.Request) {
@@ -35,22 +36,22 @@ func (s *Service) createClient(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, "key is required", http.StatusBadRequest)
 		return
 	}
-	if req.Scope != "" || req.TokenEndpointAuthMethod != "" {
-		log.INFO.Printf("testmode: /test/clients received scope=%q token_endpoint_auth_method=%q "+
-			"(accepted but not yet enforced; see PR-3, PR-8)",
-			req.Scope, req.TokenEndpointAuthMethod)
+	if req.Scope != "" {
+		log.INFO.Printf("testmode: /test/clients received scope=%q (accepted but not yet enforced; see PR-3)",
+			req.Scope)
 	}
 
-	client, err := s.oauthService.CreateClient(req.Key, req.Secret, req.RedirectURI)
+	client, err := s.oauthService.CreateClient(req.Key, req.Secret, req.RedirectURI, req.TokenEndpointAuthMethod)
 	if err != nil {
 		response.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	response.WriteJSON(w, clientResponse{
-		ID:          client.ID,
-		Key:         client.Key,
-		RedirectURI: client.RedirectURI.String,
+		ID:                      client.ID,
+		Key:                     client.Key,
+		RedirectURI:             client.RedirectURI.String,
+		TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
 	}, http.StatusCreated)
 }
 

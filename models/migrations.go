@@ -25,6 +25,10 @@ var (
 			Name:     "pkce_challenge",
 			Function: migrate0004,
 		},
+		{
+			Name:     "client_auth_method",
+			Function: migrate0005,
+		},
 	}
 )
 
@@ -154,6 +158,15 @@ func migrate0003(db *gorm.DB, name string) error {
 func migrate0004(db *gorm.DB, name string) error {
 	if err := db.AutoMigrate(new(OauthAuthorizationCode)).Error; err != nil {
 		return fmt.Errorf("Error adding PKCE columns: %s", err)
+	}
+	return nil
+}
+
+// migrate0005 adds token_endpoint_auth_method to oauth_clients. Default
+// 'client_secret_basic' so existing rows behave exactly as before.
+func migrate0005(db *gorm.DB, name string) error {
+	if err := db.AutoMigrate(new(OauthClient)).Error; err != nil {
+		return fmt.Errorf("Error adding token_endpoint_auth_method column: %s", err)
 	}
 	return nil
 }

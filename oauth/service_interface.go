@@ -20,8 +20,8 @@ type ServiceInterface interface {
 	RegisterRoutes(router *mux.Router, prefix string)
 	ClientExists(clientID string) bool
 	FindClientByClientID(clientID string) (*models.OauthClient, error)
-	CreateClient(clientID, secret, redirectURI string) (*models.OauthClient, error)
-	CreateClientTx(tx *gorm.DB, clientID, secret, redirectURI string) (*models.OauthClient, error)
+	CreateClient(clientID, secret, redirectURI, tokenEndpointAuthMethod string) (*models.OauthClient, error)
+	CreateClientTx(tx *gorm.DB, clientID, secret, redirectURI, tokenEndpointAuthMethod string) (*models.OauthClient, error)
 	AuthClient(clientID, secret string) (*models.OauthClient, error)
 	UserExists(username string) bool
 	FindUserByUsername(username string) (*models.OauthUser, error)

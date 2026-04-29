@@ -996,6 +996,180 @@ func TestTokenRevocation(t *testing.T) {
 	})
 }
 
+func TestResourceServer(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	mustPostJSON(t, srv.URL+"/test/clients", map[string]string{
+		"key":          "res-client",
+		"secret":       "res-secret",
+		"redirect_uri": "https://x.example.com/cb",
+	})
+	mustPostJSON(t, srv.URL+"/test/users", map[string]string{
+		"username": "grace@example.com",
+		"password": "hunter22",
+	})
+
+	getAccessToken := func(t *testing.T, scope string) string {
+		t.Helper()
+		form := url.Values{}
+		form.Set("grant_type", "password")
+		form.Set("username", "grace@example.com")
+		form.Set("password", "hunter22")
+		form.Set("scope", scope)
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("res-client", "res-secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("token: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var tok struct{ AccessToken string `json:"access_token"` }
+		json.Unmarshal(body, &tok)
+		if tok.AccessToken == "" {
+			t.Fatalf("no access token: %s", body)
+		}
+		return tok.AccessToken
+	}
+
+	getResource := func(t *testing.T, path, token string) (int, http.Header, []byte) {
+		t.Helper()
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("get resource: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, resp.Header, body
+	}
+
+	t.Run("valid bearer token returns default 200 body", func(t *testing.T) {
+		at := getAccessToken(t, "read")
+		status, _, body := getResource(t, "/test/resource/foo", at)
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", status, body)
+		}
+		var doc map[string]any
+		json.Unmarshal(body, &doc)
+		if doc["path"] != "/test/resource/foo" {
+			t.Fatalf("expected path field, got %v", doc)
+		}
+		if doc["scope"] != "read" {
+			t.Fatalf("expected scope=read, got %v", doc)
+		}
+		if doc["client_id"] == nil || doc["client_id"] == "" {
+			t.Fatalf("expected client_id, got %v", doc)
+		}
+	})
+
+	t.Run("missing Authorization returns 401 with WWW-Authenticate", func(t *testing.T) {
+		status, hdr, _ := getResource(t, "/test/resource/foo", "")
+		if status != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", status)
+		}
+		if got := hdr.Get("WWW-Authenticate"); !strings.Contains(got, `error="invalid_token"`) {
+			t.Fatalf("expected invalid_token in WWW-Authenticate, got %q", got)
+		}
+	})
+
+	t.Run("revoked access token returns 401", func(t *testing.T) {
+		at := getAccessToken(t, "read")
+		// Revoke via the test-mode admin endpoint.
+		buf, _ := json.Marshal(map[string]string{"token": at})
+		http.Post(srv.URL+"/test/revoke", "application/json", bytes.NewReader(buf))
+
+		status, _, _ := getResource(t, "/test/resource/foo", at)
+		if status != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for revoked token, got %d", status)
+		}
+	})
+
+	t.Run("scope policy enforces required scope", func(t *testing.T) {
+		// Register: /test/resource/admin requires read_write
+		buf, _ := json.Marshal(map[string]string{
+			"path":           "/test/resource/admin",
+			"required_scope": "read_write",
+		})
+		resp, _ := http.Post(srv.URL+"/test/resource-policy", "application/json", bytes.NewReader(buf))
+		resp.Body.Close()
+
+		// read-only token gets 403
+		atRead := getAccessToken(t, "read")
+		status, hdr, body := getResource(t, "/test/resource/admin", atRead)
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d body=%s", status, body)
+		}
+		if got := hdr.Get("WWW-Authenticate"); !strings.Contains(got, `error="insufficient_scope"`) {
+			t.Fatalf("expected insufficient_scope, got %q", got)
+		}
+		if got := hdr.Get("WWW-Authenticate"); !strings.Contains(got, `scope="read_write"`) {
+			t.Fatalf("expected scope= in WWW-Authenticate, got %q", got)
+		}
+
+		// read_write token passes
+		atRW := getAccessToken(t, "read_write")
+		status2, _, body2 := getResource(t, "/test/resource/admin", atRW)
+		if status2 != http.StatusOK {
+			t.Fatalf("expected 200 for read_write, got %d body=%s", status2, body2)
+		}
+	})
+
+	t.Run("script queue intercepts resource calls", func(t *testing.T) {
+		at := getAccessToken(t, "read")
+		buf, _ := json.Marshal(map[string]any{
+			"endpoint": "resource",
+			"actions":  []map[string]any{{"status": 500, "body": `{"e":"bad"}`}},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		status, _, body := getResource(t, "/test/resource/foo", at)
+		if status != 500 {
+			t.Fatalf("expected scripted 500, got %d body=%s", status, body)
+		}
+		if !strings.Contains(string(body), "bad") {
+			t.Fatalf("expected scripted body, got %s", body)
+		}
+	})
+
+	t.Run("resource calls are recorded", func(t *testing.T) {
+		app.recorder.Reset()
+		at := getAccessToken(t, "read")
+		getResource(t, "/test/resource/inspect-me", at)
+
+		entries := app.recorder.Snapshot(testmode.SnapshotFilter{Endpoint: "resource"})
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 recorded resource request, got %d", len(entries))
+		}
+		e := entries[0]
+		if e.Path != "/test/resource/inspect-me" {
+			t.Fatalf("expected path /test/resource/inspect-me, got %q", e.Path)
+		}
+		if got := e.Headers["Authorization"]; got != "Bearer <redacted>" {
+			t.Fatalf("expected Bearer <redacted>, got %q", got)
+		}
+	})
+
+	t.Run("/test/resource-policy is not classified as a resource call", func(t *testing.T) {
+		app.recorder.Reset()
+		buf, _ := json.Marshal(map[string]string{
+			"path":           "/test/resource/x",
+			"required_scope": "",
+		})
+		resp, _ := http.Post(srv.URL+"/test/resource-policy", "application/json", bytes.NewReader(buf))
+		resp.Body.Close()
+		entries := app.recorder.Snapshot(testmode.SnapshotFilter{Endpoint: "resource"})
+		if len(entries) != 0 {
+			t.Fatalf("/test/resource-policy should not be recorded as resource: %v", entries)
+		}
+	})
+}
+
 func mustGet(t *testing.T, u string) *http.Response {
 	t.Helper()
 	resp, err := http.Get(u)

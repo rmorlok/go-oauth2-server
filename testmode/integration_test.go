@@ -201,7 +201,9 @@ func TestProductionSampleResource(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("token expected 200, got %d body=%s", resp.StatusCode, body)
 	}
-	var tok struct{ AccessToken string `json:"access_token"` }
+	var tok struct {
+		AccessToken string `json:"access_token"`
+	}
 	json.Unmarshal(body, &tok)
 	if tok.AccessToken == "" {
 		t.Fatalf("no access token: %s", body)
@@ -279,7 +281,9 @@ func TestProgrammaticAuthorize(t *testing.T) {
 			"state":        "xyzzy",
 			"decision":     "approve",
 		})
-		var resp struct{ RedirectURL string `json:"redirect_url"` }
+		var resp struct {
+			RedirectURL string `json:"redirect_url"`
+		}
 		if err := json.Unmarshal(body, &resp); err != nil {
 			t.Fatalf("decode authorize body: %v", err)
 		}
@@ -334,7 +338,9 @@ func TestProgrammaticAuthorize(t *testing.T) {
 			"state":        "denied-state",
 			"decision":     "deny",
 		})
-		var resp struct{ RedirectURL string `json:"redirect_url"` }
+		var resp struct {
+			RedirectURL string `json:"redirect_url"`
+		}
 		json.Unmarshal(body, &resp)
 		u, _ := url.Parse(resp.RedirectURL)
 		if got := u.Query().Get("error"); got != "access_denied" {
@@ -376,7 +382,9 @@ func TestProgrammaticAuthorize(t *testing.T) {
 			"granted_scope": "read",
 			"decision":      "approve",
 		})
-		var resp struct{ RedirectURL string `json:"redirect_url"` }
+		var resp struct {
+			RedirectURL string `json:"redirect_url"`
+		}
 		json.Unmarshal(body, &resp)
 		u, _ := url.Parse(resp.RedirectURL)
 		code := u.Query().Get("code")
@@ -1108,7 +1116,9 @@ func TestResourceServer(t *testing.T) {
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		var tok struct{ AccessToken string `json:"access_token"` }
+		var tok struct {
+			AccessToken string `json:"access_token"`
+		}
 		json.Unmarshal(body, &tok)
 		if tok.AccessToken == "" {
 			t.Fatalf("no access token: %s", body)
@@ -1278,7 +1288,9 @@ func TestPKCE(t *testing.T) {
 		raw, _ = io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
-			var r struct{ RedirectURL string `json:"redirect_url"` }
+			var r struct {
+				RedirectURL string `json:"redirect_url"`
+			}
 			json.Unmarshal(raw, &r)
 			redirect = r.RedirectURL
 		}
@@ -1476,8 +1488,8 @@ func TestAuthMethodCompatibility(t *testing.T) {
 	registerClient := func(t *testing.T, key, secret, method string) {
 		t.Helper()
 		body := map[string]string{
-			"key":          key,
-			"redirect_uri": "https://app.example.com/cb",
+			"key":                        key,
+			"redirect_uri":               "https://app.example.com/cb",
 			"token_endpoint_auth_method": method,
 		}
 		if secret != "" {
@@ -1564,7 +1576,9 @@ func TestAuthMethodCompatibility(t *testing.T) {
 			"code_challenge":        challenge,
 			"code_challenge_method": "S256",
 		})
-		var ar struct{ RedirectURL string `json:"redirect_url"` }
+		var ar struct {
+			RedirectURL string `json:"redirect_url"`
+		}
 		json.Unmarshal(body, &ar)
 		u, _ := url.Parse(ar.RedirectURL)
 		code := u.Query().Get("code")
@@ -1648,7 +1662,9 @@ func TestAuthMethodCompatibility(t *testing.T) {
 		form.Set("client_id", "post-c")
 		form.Set("client_secret", "post-s")
 		_, body := tokenCall(t, "", "", form)
-		var tok struct{ AccessToken string `json:"access_token"` }
+		var tok struct {
+			AccessToken string `json:"access_token"`
+		}
 		json.Unmarshal(body, &tok)
 		if tok.AccessToken == "" {
 			t.Fatalf("expected access_token, got %s", body)
@@ -1710,7 +1726,9 @@ func TestUserinfoAndIdentity(t *testing.T) {
 		"email":        "henry@example.com",
 		"display_name": "Henry",
 	})
-	var user struct{ ID string `json:"id"` }
+	var user struct {
+		ID string `json:"id"`
+	}
 	json.Unmarshal(userBody, &user)
 	if user.ID == "" {
 		t.Fatalf("expected user id in response: %s", userBody)
@@ -1732,7 +1750,9 @@ func TestUserinfoAndIdentity(t *testing.T) {
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		var tok struct{ AccessToken string `json:"access_token"` }
+		var tok struct {
+			AccessToken string `json:"access_token"`
+		}
 		json.Unmarshal(body, &tok)
 		if tok.AccessToken == "" {
 			t.Fatalf("no access token: %s", body)
@@ -1813,7 +1833,9 @@ func TestUserinfoAndIdentity(t *testing.T) {
 		resp, _ := http.DefaultClient.Do(req)
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		var tok struct{ AccessToken string `json:"access_token"` }
+		var tok struct {
+			AccessToken string `json:"access_token"`
+		}
 		json.Unmarshal(body, &tok)
 		if tok.AccessToken == "" {
 			t.Fatalf("expected access_token: %s", body)
@@ -1988,7 +2010,9 @@ func TestStrictPKCEPerClient(t *testing.T) {
 		resp, _ := http.Post(srv.URL+"/test/authorize", "application/json", bytes.NewReader(buf))
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		var ar struct{ RedirectURL string `json:"redirect_url"` }
+		var ar struct {
+			RedirectURL string `json:"redirect_url"`
+		}
 		json.Unmarshal(body, &ar)
 		u, _ := url.Parse(ar.RedirectURL)
 		code := u.Query().Get("code")
@@ -2026,7 +2050,9 @@ func TestStrictPKCEPerClient(t *testing.T) {
 		resp, _ := http.Post(srv.URL+"/test/authorize", "application/json", bytes.NewReader(buf))
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		var ar struct{ RedirectURL string `json:"redirect_url"` }
+		var ar struct {
+			RedirectURL string `json:"redirect_url"`
+		}
 		json.Unmarshal(body, &ar)
 		u, _ := url.Parse(ar.RedirectURL)
 		code := u.Query().Get("code")

@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build & vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go build ./...
+      - run: go vet ./...
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "::error::gofmt would reformat:"
+            echo "$out"
+            exit 1
+          fi
+
+  test:
+    name: tests + coverage
+    runs-on: ubuntu-latest
+    # Run inside a Go container so the Postgres service is reachable at
+    # the docker-compose-style hostname `postgres`, matching the value
+    # in config/factory.go's default DatabaseConfig.Host.
+    container:
+      image: golang:1.25.7
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: go_oauth2_server
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: go_oauth2_server
+        options: >-
+          --health-cmd "pg_isready -U go_oauth2_server"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sqlite headers
+        # mattn/go-sqlite3 needs libsqlite3 at link time when CGO is on
+        # (mirrors Dockerfile.test).
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends libsqlite3-dev
+      - name: Module cache
+        uses: actions/cache@v4
+        with:
+          # Inside the golang container, GOPATH=/go and HOME=/root.
+          path: |
+            /go/pkg/mod
+            /root/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - run: go mod download
+      - run: make test-with-coverage
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage-all.out
+          fail_ci_if_error: false

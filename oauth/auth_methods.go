@@ -38,8 +38,8 @@ var ErrClientRequiresPKCE = errors.New("client requires PKCE: code_challenge is 
 //   - client_secret_basic: HTTP Basic; reject form client_id/client_secret
 //   - client_secret_post:  form client_id+client_secret; reject Basic
 //   - none:                form client_id only; reject Basic and form secret.
-//                          PKCE on the authorization_code grant is enforced
-//                          at GrantAuthorizationCode time.
+//     PKCE on the authorization_code grant is enforced
+//     at GrantAuthorizationCode time.
 //
 // Mismatches return ErrInvalidClientIDOrSecret which the handler maps to
 // 401. Empty TokenEndpointAuthMethod on the client record is treated as

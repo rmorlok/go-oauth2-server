@@ -14,9 +14,9 @@ type adminRevokeRequest struct {
 }
 
 type adminRevokeResponse struct {
-	Found          bool  `json:"found,omitempty"`
-	RefreshTokens  int64 `json:"refresh_tokens_revoked,omitempty"`
-	AccessTokens   int64 `json:"access_tokens_revoked,omitempty"`
+	Found         bool  `json:"found,omitempty"`
+	RefreshTokens int64 `json:"refresh_tokens_revoked,omitempty"`
+	AccessTokens  int64 `json:"access_tokens_revoked,omitempty"`
 }
 
 // adminRevoke implements POST /test/revoke. It exists so a test harness can

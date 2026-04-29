@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/RichardKnop/go-oauth2-server/log"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 var (

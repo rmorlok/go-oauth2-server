@@ -9,6 +9,10 @@ import (
 func (s *Service) RegisterRoutes(router *mux.Router, prefix string) {
 	subRouter := router.PathPrefix(prefix).Subrouter()
 	routes.AddRoutes(s.GetRoutes(), subRouter)
+
+	// /resource/* is a catch-all that matches any HTTP method, so it can't
+	// fit through routes.AddRoutes (which is method-specific).
+	subRouter.PathPrefix("/resource/").HandlerFunc(s.resourceHandler)
 }
 
 // GetRoutes returns the routes exposed by the test-mode control plane.
@@ -73,6 +77,12 @@ func (s *Service) GetRoutes() []routes.Route {
 			Method:      "POST",
 			Pattern:     "/revoke",
 			HandlerFunc: s.adminRevoke,
+		},
+		{
+			Name:        "test_resource_policy",
+			Method:      "POST",
+			Pattern:     "/resource-policy",
+			HandlerFunc: s.resourcePolicyHandler,
 		},
 	}
 }

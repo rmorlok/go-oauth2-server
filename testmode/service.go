@@ -8,21 +8,23 @@ import (
 
 // Service holds dependencies for the test-mode control plane.
 type Service struct {
-	cnf          *config.Config
-	db           *gorm.DB
-	oauthService oauth.ServiceInterface
-	recorder     *Recorder
-	queue        *ScriptQueue
+	cnf              *config.Config
+	db               *gorm.DB
+	oauthService     oauth.ServiceInterface
+	recorder         *Recorder
+	queue            *ScriptQueue
+	resourcePolicies *resourcePolicies
 }
 
 // NewService constructs a test-mode service.
 func NewService(cnf *config.Config, db *gorm.DB, oauthService oauth.ServiceInterface) *Service {
 	return &Service{
-		cnf:          cnf,
-		db:           db,
-		oauthService: oauthService,
-		recorder:     NewRecorder(0),
-		queue:        NewScriptQueue(),
+		cnf:              cnf,
+		db:               db,
+		oauthService:     oauthService,
+		recorder:         NewRecorder(0),
+		queue:            NewScriptQueue(),
+		resourcePolicies: newResourcePolicies(),
 	}
 }
 

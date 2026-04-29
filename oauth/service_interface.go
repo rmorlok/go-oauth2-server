@@ -1,6 +1,8 @@
 package oauth
 
 import (
+	"net/http"
+
 	"github.com/RichardKnop/go-oauth2-server/config"
 	"github.com/RichardKnop/go-oauth2-server/models"
 	"github.com/RichardKnop/go-oauth2-server/session"
@@ -48,5 +50,8 @@ type ServiceInterface interface {
 	AdminRevokeByToken(token string) (bool, error)
 	AdminRevokeByUser(userID string) (int64, int64, error)
 	AdminRevokeByClient(clientID string) (int64, int64, error)
+	ServeSampleResource(w http.ResponseWriter, r *http.Request, realm string, policy ScopePolicyFunc)
+	SampleResourceHandler(w http.ResponseWriter, r *http.Request)
+	RegisterSampleResource(router *mux.Router, prefix string)
 	Close()
 }

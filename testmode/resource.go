@@ -2,11 +2,11 @@ package testmode
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 
+	"github.com/RichardKnop/go-oauth2-server/oauth"
 	"github.com/RichardKnop/go-oauth2-server/util/response"
 )
 
@@ -55,26 +55,21 @@ func (p *resourcePolicies) clear() {
 // Default body: 200 with {sub, client_id, scope, path}. The recorder
 // captures the inbound request automatically.
 func (s *Service) resourceHandler(w http.ResponseWriter, r *http.Request) {
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		writeBearerError(w, http.StatusUnauthorized, "invalid_token", "missing Authorization header", "")
-		return
-	}
-	parts := strings.SplitN(auth, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
-		writeBearerError(w, http.StatusUnauthorized, "invalid_token", "Authorization header must be 'Bearer <token>'", "")
+	token, errDesc := oauth.ExtractBearerToken(r)
+	if errDesc != "" {
+		oauth.WriteBearerError(w, http.StatusUnauthorized, "invalid_token", errDesc, "test", "")
 		return
 	}
 
-	accessToken, err := s.oauthService.Authenticate(parts[1])
+	accessToken, err := s.oauthService.Authenticate(token)
 	if err != nil {
-		writeBearerError(w, http.StatusUnauthorized, "invalid_token", err.Error(), "")
+		oauth.WriteBearerError(w, http.StatusUnauthorized, "invalid_token", err.Error(), "test", "")
 		return
 	}
 
 	if required, ok := s.resourcePolicies.get(r.URL.Path); ok {
-		if !hasAllScopes(accessToken.Scope, required) {
-			writeBearerError(w, http.StatusForbidden, "insufficient_scope", "token does not have required scope(s)", required)
+		if !oauth.HasAllScopes(accessToken.Scope, required) {
+			oauth.WriteBearerError(w, http.StatusForbidden, "insufficient_scope", "token does not have required scope(s)", "test", required)
 			return
 		}
 	}
@@ -116,43 +111,3 @@ func (s *Service) resourcePolicyHandler(w http.ResponseWriter, r *http.Request) 
 	response.NoContent(w)
 }
 
-// hasAllScopes reports whether every space-separated scope in `required`
-// is also present in `granted`.
-func hasAllScopes(granted, required string) bool {
-	if required == "" {
-		return true
-	}
-	grantedSet := make(map[string]struct{})
-	for _, s := range strings.Fields(granted) {
-		grantedSet[s] = struct{}{}
-	}
-	for _, want := range strings.Fields(required) {
-		if _, ok := grantedSet[want]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-// writeBearerError writes an RFC 6750 §3 WWW-Authenticate response.
-func writeBearerError(w http.ResponseWriter, status int, code, description, scope string) {
-	parts := []string{`realm="test"`}
-	if code != "" {
-		parts = append(parts, fmt.Sprintf(`error="%s"`, code))
-	}
-	if description != "" {
-		parts = append(parts, fmt.Sprintf(`error_description="%s"`, sanitizeHeaderValue(description)))
-	}
-	if scope != "" {
-		parts = append(parts, fmt.Sprintf(`scope="%s"`, scope))
-	}
-	w.Header().Set("WWW-Authenticate", "Bearer "+strings.Join(parts, ", "))
-	response.Error(w, code, status)
-}
-
-// sanitizeHeaderValue strips characters that would break the
-// WWW-Authenticate quoted-string. Test-mode only; cheap and safe.
-func sanitizeHeaderValue(s string) string {
-	r := strings.NewReplacer(`"`, `'`, "\r", " ", "\n", " ")
-	return r.Replace(s)
-}

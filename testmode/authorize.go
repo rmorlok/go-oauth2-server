@@ -120,7 +120,7 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// PKCE input errors are user errors → 400; everything else → 500.
 		switch err {
-		case oauth.ErrPKCEInvalidRequest, oauth.ErrPKCEMethodUnsupported:
+		case oauth.ErrPKCEInvalidRequest, oauth.ErrPKCEMethodUnsupported, oauth.ErrClientRequiresPKCE:
 			response.Error(w, err.Error(), http.StatusBadRequest)
 		default:
 			response.Error(w, "granting authorization code: "+err.Error(), http.StatusInternalServerError)

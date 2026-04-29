@@ -26,9 +26,10 @@ func ValidAuthMethod(m string) bool {
 	return false
 }
 
-// ErrPublicClientRequiresPKCE is returned when GrantAuthorizationCode is
-// called for a `none` client without a code_challenge.
-var ErrPublicClientRequiresPKCE = errors.New("public clients (token_endpoint_auth_method=none) must use PKCE")
+// ErrClientRequiresPKCE is returned when GrantAuthorizationCode is called
+// for a client that requires PKCE (either token_endpoint_auth_method=none
+// or require_pkce=true) but the request omits code_challenge.
+var ErrClientRequiresPKCE = errors.New("client requires PKCE: code_challenge is mandatory")
 
 // authenticateClient resolves and authenticates the client for token,
 // introspect, and revoke endpoints, applying the per-client

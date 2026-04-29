@@ -19,12 +19,12 @@ var (
 // and codeChallengeMethod implement RFC 7636 PKCE; both empty means the
 // request did not opt into PKCE.
 //
-// Public clients (token_endpoint_auth_method=none) MUST use PKCE — the
-// code_challenge is required and the call fails with
-// ErrPublicClientRequiresPKCE if absent.
+// Clients with RequirePKCE=true (which `none` clients always are) MUST
+// supply a code_challenge — the call fails with ErrClientRequiresPKCE
+// if absent.
 func (s *Service) GrantAuthorizationCode(client *models.OauthClient, user *models.OauthUser, expiresIn int, redirectURI, scope, codeChallenge, codeChallengeMethod string) (*models.OauthAuthorizationCode, error) {
-	if client.TokenEndpointAuthMethod == AuthMethodNone && codeChallenge == "" {
-		return nil, ErrPublicClientRequiresPKCE
+	if client.RequirePKCE && codeChallenge == "" {
+		return nil, ErrClientRequiresPKCE
 	}
 
 	resolvedMethod, err := validateChallengeAtAuthorize(codeChallenge, codeChallengeMethod)

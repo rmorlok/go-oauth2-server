@@ -33,6 +33,10 @@ var (
 			Name:     "user_identity_columns",
 			Function: migrate0006,
 		},
+		{
+			Name:     "client_require_pkce",
+			Function: migrate0007,
+		},
 	}
 )
 
@@ -181,6 +185,16 @@ func migrate0005(db *gorm.DB, name string) error {
 func migrate0006(db *gorm.DB, name string) error {
 	if err := db.AutoMigrate(new(OauthUser)).Error; err != nil {
 		return fmt.Errorf("Error adding user identity columns: %s", err)
+	}
+	return nil
+}
+
+// migrate0007 adds require_pkce to oauth_clients so confidential clients
+// can opt into the strict PKCE regime. Default false; existing rows are
+// unaffected.
+func migrate0007(db *gorm.DB, name string) error {
+	if err := db.AutoMigrate(new(OauthClient)).Error; err != nil {
+		return fmt.Errorf("Error adding require_pkce column: %s", err)
 	}
 	return nil
 }

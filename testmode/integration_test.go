@@ -1835,6 +1835,138 @@ func TestUserinfoAndIdentity(t *testing.T) {
 	})
 }
 
+func TestStrictPKCEPerClient(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
+	t.Run("none clients have require_pkce=true reported back", func(t *testing.T) {
+		body := mustPostJSON(t, srv.URL+"/test/clients", map[string]any{
+			"key":                        "auto-strict",
+			"redirect_uri":               "https://app.example.com/cb",
+			"token_endpoint_auth_method": "none",
+		})
+		var resp struct {
+			TokenEndpointAuthMethod string `json:"token_endpoint_auth_method"`
+			RequirePKCE             bool   `json:"require_pkce"`
+		}
+		json.Unmarshal(body, &resp)
+		if resp.TokenEndpointAuthMethod != "none" {
+			t.Fatalf("expected method=none, got %q", resp.TokenEndpointAuthMethod)
+		}
+		if !resp.RequirePKCE {
+			t.Fatalf("none clients should auto-set require_pkce=true, body=%s", body)
+		}
+	})
+
+	t.Run("confidential client with require_pkce: authorize without challenge rejected", func(t *testing.T) {
+		mustPostJSON(t, srv.URL+"/test/clients", map[string]any{
+			"key":          "strict-conf",
+			"secret":       "strict-secret",
+			"redirect_uri": "https://app.example.com/cb",
+			"require_pkce": true,
+		})
+		mustPostJSON(t, srv.URL+"/test/users", map[string]string{
+			"username": "kara@example.com",
+			"password": "hunter22",
+		})
+
+		buf, _ := json.Marshal(map[string]any{
+			"client_id":    "strict-conf",
+			"username":     "kara@example.com",
+			"redirect_uri": "https://app.example.com/cb",
+			"scope":        "read",
+			"decision":     "approve",
+			// no code_challenge
+		})
+		resp, _ := http.Post(srv.URL+"/test/authorize", "application/json", bytes.NewReader(buf))
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("strict confidential client without challenge: expected 400, got %d body=%s", resp.StatusCode, body)
+		}
+		if !strings.Contains(string(body), "PKCE") {
+			t.Fatalf("error should mention PKCE, got %s", body)
+		}
+	})
+
+	t.Run("confidential client with require_pkce: full PKCE flow succeeds", func(t *testing.T) {
+		// strict-conf already registered above.
+		buf, _ := json.Marshal(map[string]any{
+			"client_id":             "strict-conf",
+			"username":              "kara@example.com",
+			"redirect_uri":          "https://app.example.com/cb",
+			"scope":                 "read",
+			"decision":              "approve",
+			"code_challenge":        challenge,
+			"code_challenge_method": "S256",
+		})
+		resp, _ := http.Post(srv.URL+"/test/authorize", "application/json", bytes.NewReader(buf))
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var ar struct{ RedirectURL string `json:"redirect_url"` }
+		json.Unmarshal(body, &ar)
+		u, _ := url.Parse(ar.RedirectURL)
+		code := u.Query().Get("code")
+
+		form := url.Values{}
+		form.Set("grant_type", "authorization_code")
+		form.Set("code", code)
+		form.Set("redirect_uri", "https://app.example.com/cb")
+		form.Set("code_verifier", verifier)
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("strict-conf", "strict-secret")
+		tokenResp, _ := http.DefaultClient.Do(req)
+		body2, _ := io.ReadAll(tokenResp.Body)
+		tokenResp.Body.Close()
+		if tokenResp.StatusCode != http.StatusOK {
+			t.Fatalf("strict client + full PKCE expected 200, got %d body=%s", tokenResp.StatusCode, body2)
+		}
+	})
+
+	t.Run("non-strict client still allows spurious verifier (RFC §4.5)", func(t *testing.T) {
+		mustPostJSON(t, srv.URL+"/test/clients", map[string]any{
+			"key":          "lax-conf",
+			"secret":       "lax-secret",
+			"redirect_uri": "https://app.example.com/cb",
+		})
+		buf, _ := json.Marshal(map[string]any{
+			"client_id":    "lax-conf",
+			"username":     "kara@example.com",
+			"redirect_uri": "https://app.example.com/cb",
+			"scope":        "read",
+			"decision":     "approve",
+			// no code_challenge
+		})
+		resp, _ := http.Post(srv.URL+"/test/authorize", "application/json", bytes.NewReader(buf))
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var ar struct{ RedirectURL string `json:"redirect_url"` }
+		json.Unmarshal(body, &ar)
+		u, _ := url.Parse(ar.RedirectURL)
+		code := u.Query().Get("code")
+
+		// Send a spurious verifier. Lax clients ignore it.
+		form := url.Values{}
+		form.Set("grant_type", "authorization_code")
+		form.Set("code", code)
+		form.Set("redirect_uri", "https://app.example.com/cb")
+		form.Set("code_verifier", "SPURIOUS")
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("lax-conf", "lax-secret")
+		tokenResp, _ := http.DefaultClient.Do(req)
+		body2, _ := io.ReadAll(tokenResp.Body)
+		tokenResp.Body.Close()
+		if tokenResp.StatusCode != http.StatusOK {
+			t.Fatalf("lax client should accept spurious verifier, got %d body=%s", tokenResp.StatusCode, body2)
+		}
+	})
+}
+
 func mustGet(t *testing.T, u string) *http.Response {
 	t.Helper()
 	resp, err := http.Get(u)

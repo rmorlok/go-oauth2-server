@@ -46,6 +46,7 @@ func (suite *OauthTestSuite) TestCreateClient() {
 		"test_client_1",           // client ID
 		"test_secret",             // secret
 		"https://www.example.com", // redirect URI
+		"",                        // token_endpoint_auth_method (default)
 	)
 
 	// Client object should be nil
@@ -61,6 +62,7 @@ func (suite *OauthTestSuite) TestCreateClient() {
 		"test_client_3",           // client ID
 		"test_secret",             // secret
 		"https://www.example.com", // redirect URI
+		"",                        // token_endpoint_auth_method (default)
 	)
 
 	// Error should be nil

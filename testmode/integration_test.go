@@ -1387,6 +1387,230 @@ func TestPKCE(t *testing.T) {
 	})
 }
 
+func TestAuthMethodCompatibility(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	registerClient := func(t *testing.T, key, secret, method string) {
+		t.Helper()
+		body := map[string]string{
+			"key":          key,
+			"redirect_uri": "https://app.example.com/cb",
+			"token_endpoint_auth_method": method,
+		}
+		if secret != "" {
+			body["secret"] = secret
+		}
+		mustPostJSON(t, srv.URL+"/test/clients", body)
+	}
+
+	tokenCall := func(t *testing.T, basicUser, basicPass string, form url.Values) (int, []byte) {
+		t.Helper()
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if basicUser != "" {
+			req.SetBasicAuth(basicUser, basicPass)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("token: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, body
+	}
+
+	t.Run("client_secret_basic: basic works, post rejected", func(t *testing.T) {
+		registerClient(t, "basic-c", "basic-s", "client_secret_basic")
+		// Basic OK
+		form := url.Values{}
+		form.Set("grant_type", "client_credentials")
+		form.Set("scope", "read")
+		status, _ := tokenCall(t, "basic-c", "basic-s", form)
+		if status != http.StatusOK {
+			t.Fatalf("basic auth on basic client expected 200, got %d", status)
+		}
+		// Post rejected
+		formPost := url.Values{}
+		formPost.Set("grant_type", "client_credentials")
+		formPost.Set("scope", "read")
+		formPost.Set("client_id", "basic-c")
+		formPost.Set("client_secret", "basic-s")
+		status2, _ := tokenCall(t, "", "", formPost)
+		if status2 != http.StatusUnauthorized {
+			t.Fatalf("post auth on basic client should fail, got %d", status2)
+		}
+	})
+
+	t.Run("client_secret_post: post works, basic rejected", func(t *testing.T) {
+		registerClient(t, "post-c", "post-s", "client_secret_post")
+		// Post OK
+		form := url.Values{}
+		form.Set("grant_type", "client_credentials")
+		form.Set("scope", "read")
+		form.Set("client_id", "post-c")
+		form.Set("client_secret", "post-s")
+		status, body := tokenCall(t, "", "", form)
+		if status != http.StatusOK {
+			t.Fatalf("post auth on post client expected 200, got %d body=%s", status, body)
+		}
+		// Basic rejected
+		form2 := url.Values{}
+		form2.Set("grant_type", "client_credentials")
+		form2.Set("scope", "read")
+		status2, _ := tokenCall(t, "post-c", "post-s", form2)
+		if status2 != http.StatusUnauthorized {
+			t.Fatalf("basic auth on post client should fail, got %d", status2)
+		}
+	})
+
+	t.Run("none: public client + PKCE auth-code works without secret", func(t *testing.T) {
+		registerClient(t, "pub-c", "", "none")
+		mustPostJSON(t, srv.URL+"/test/users", map[string]string{
+			"username": "pub@example.com",
+			"password": "hunter22",
+		})
+		// Authorize with code_challenge.
+		const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+		const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+		body := mustPostJSON(t, srv.URL+"/test/authorize", map[string]any{
+			"client_id":             "pub-c",
+			"username":              "pub@example.com",
+			"redirect_uri":          "https://app.example.com/cb",
+			"scope":                 "read",
+			"decision":              "approve",
+			"code_challenge":        challenge,
+			"code_challenge_method": "S256",
+		})
+		var ar struct{ RedirectURL string `json:"redirect_url"` }
+		json.Unmarshal(body, &ar)
+		u, _ := url.Parse(ar.RedirectURL)
+		code := u.Query().Get("code")
+
+		// Token exchange: form client_id, no secret, with verifier.
+		form := url.Values{}
+		form.Set("grant_type", "authorization_code")
+		form.Set("code", code)
+		form.Set("redirect_uri", "https://app.example.com/cb")
+		form.Set("client_id", "pub-c")
+		form.Set("code_verifier", verifier)
+		status, respBody := tokenCall(t, "", "", form)
+		if status != http.StatusOK {
+			t.Fatalf("none-client auth-code+PKCE expected 200, got %d body=%s", status, respBody)
+		}
+	})
+
+	t.Run("none: auth-code without PKCE rejected at /test/authorize", func(t *testing.T) {
+		// pub-c already registered above.
+		buf, _ := json.Marshal(map[string]any{
+			"client_id":    "pub-c",
+			"username":     "pub@example.com",
+			"redirect_uri": "https://app.example.com/cb",
+			"scope":        "read",
+			"decision":     "approve",
+			// no code_challenge
+		})
+		resp, _ := http.Post(srv.URL+"/test/authorize", "application/json", bytes.NewReader(buf))
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			t.Fatalf("none-client auth-code without PKCE should fail, got 200 body=%s", body)
+		}
+	})
+
+	t.Run("none: rejects basic auth at token endpoint", func(t *testing.T) {
+		// pub-c is registered as none.
+		form := url.Values{}
+		form.Set("grant_type", "client_credentials")
+		form.Set("scope", "read")
+		status, _ := tokenCall(t, "pub-c", "anything", form)
+		if status != http.StatusUnauthorized {
+			t.Fatalf("none client with basic auth should fail, got %d", status)
+		}
+	})
+
+	t.Run("none: rejects form client_secret", func(t *testing.T) {
+		form := url.Values{}
+		form.Set("grant_type", "client_credentials")
+		form.Set("scope", "read")
+		form.Set("client_id", "pub-c")
+		form.Set("client_secret", "anything")
+		status, _ := tokenCall(t, "", "", form)
+		if status != http.StatusUnauthorized {
+			t.Fatalf("none client with client_secret in form should fail, got %d", status)
+		}
+	})
+
+	t.Run("default (empty) method behaves like client_secret_basic", func(t *testing.T) {
+		// Existing tests already cover this implicitly, but be explicit.
+		mustPostJSON(t, srv.URL+"/test/clients", map[string]string{
+			"key":          "default-c",
+			"secret":       "default-s",
+			"redirect_uri": "https://app.example.com/cb",
+		})
+		form := url.Values{}
+		form.Set("grant_type", "client_credentials")
+		form.Set("scope", "read")
+		status, _ := tokenCall(t, "default-c", "default-s", form)
+		if status != http.StatusOK {
+			t.Fatalf("default client expected 200 with basic auth, got %d", status)
+		}
+	})
+
+	t.Run("revoke and introspect honor the configured method", func(t *testing.T) {
+		// post-c is registered above.
+		// Get a token via post auth.
+		form := url.Values{}
+		form.Set("grant_type", "client_credentials")
+		form.Set("scope", "read")
+		form.Set("client_id", "post-c")
+		form.Set("client_secret", "post-s")
+		_, body := tokenCall(t, "", "", form)
+		var tok struct{ AccessToken string `json:"access_token"` }
+		json.Unmarshal(body, &tok)
+		if tok.AccessToken == "" {
+			t.Fatalf("expected access_token, got %s", body)
+		}
+
+		// Revoke via post auth: OK
+		rForm := url.Values{}
+		rForm.Set("token", tok.AccessToken)
+		rForm.Set("client_id", "post-c")
+		rForm.Set("client_secret", "post-s")
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/revoke", strings.NewReader(rForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, _ := http.DefaultClient.Do(req)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("post-auth revoke expected 200, got %d", resp.StatusCode)
+		}
+
+		// Revoke via basic auth on the post-only client: 401
+		req2, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/revoke", strings.NewReader("token=x"))
+		req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req2.SetBasicAuth("post-c", "post-s")
+		resp2, _ := http.DefaultClient.Do(req2)
+		resp2.Body.Close()
+		if resp2.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("basic auth on post-only client at /revoke should be 401, got %d", resp2.StatusCode)
+		}
+	})
+
+	t.Run("unknown auth method at registration returns 400", func(t *testing.T) {
+		buf, _ := json.Marshal(map[string]string{
+			"key":                        "bad-method",
+			"secret":                     "x",
+			"redirect_uri":               "https://x/cb",
+			"token_endpoint_auth_method": "private_key_jwt",
+		})
+		resp, _ := http.Post(srv.URL+"/test/clients", "application/json", bytes.NewReader(buf))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 on unknown auth method, got %d", resp.StatusCode)
+		}
+	})
+}
+
 func mustGet(t *testing.T, u string) *http.Response {
 	t.Helper()
 	resp, err := http.Get(u)

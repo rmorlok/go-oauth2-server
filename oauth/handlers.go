@@ -39,8 +39,8 @@ func (s *Service) tokensHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Client auth
-	client, err := s.basicAuthClient(r)
+	// Client auth (per-client method: basic, post, or none)
+	client, err := s.authenticateClient(r)
 	if err != nil {
 		response.UnauthorizedError(w, err.Error())
 		return
@@ -60,8 +60,12 @@ func (s *Service) tokensHandler(w http.ResponseWriter, r *http.Request) {
 // introspectHandler handles OAuth 2.0 introspect request
 // (POST /v1/oauth/introspect)
 func (s *Service) introspectHandler(w http.ResponseWriter, r *http.Request) {
-	// Client auth
-	client, err := s.basicAuthClient(r)
+	if err := r.ParseForm(); err != nil {
+		response.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Client auth (per-client method: basic, post, or none)
+	client, err := s.authenticateClient(r)
 	if err != nil {
 		response.UnauthorizedError(w, err.Error())
 		return
@@ -78,20 +82,3 @@ func (s *Service) introspectHandler(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, resp, 200)
 }
 
-// Get client credentials from basic auth and try to authenticate client
-func (s *Service) basicAuthClient(r *http.Request) (*models.OauthClient, error) {
-	// Get client credentials from basic auth
-	clientID, secret, ok := r.BasicAuth()
-	if !ok {
-		return nil, ErrInvalidClientIDOrSecret
-	}
-
-	// Authenticate the client
-	client, err := s.AuthClient(clientID, secret)
-	if err != nil {
-		// For security reasons, return a general error message
-		return nil, ErrInvalidClientIDOrSecret
-	}
-
-	return client, nil
-}

@@ -19,6 +19,9 @@ var (
 	ErrInvalidClientSecret = errors.New("Invalid client secret")
 	// ErrClientIDTaken ...
 	ErrClientIDTaken = errors.New("Client ID taken")
+	// ErrInvalidAuthMethod is returned by CreateClient when an unknown
+	// token_endpoint_auth_method is supplied.
+	ErrInvalidAuthMethod = errors.New("Invalid token_endpoint_auth_method")
 )
 
 // ClientExists returns true if client exists
@@ -42,14 +45,16 @@ func (s *Service) FindClientByClientID(clientID string) (*models.OauthClient, er
 	return client, nil
 }
 
-// CreateClient saves a new client to database
-func (s *Service) CreateClient(clientID, secret, redirectURI string) (*models.OauthClient, error) {
-	return s.createClientCommon(s.db, clientID, secret, redirectURI)
+// CreateClient saves a new client to database. tokenEndpointAuthMethod
+// must be one of "client_secret_basic" (default), "client_secret_post",
+// "none", or empty (treated as the default).
+func (s *Service) CreateClient(clientID, secret, redirectURI, tokenEndpointAuthMethod string) (*models.OauthClient, error) {
+	return s.createClientCommon(s.db, clientID, secret, redirectURI, tokenEndpointAuthMethod)
 }
 
-// CreateClientTx saves a new client to database using injected db object
-func (s *Service) CreateClientTx(tx *gorm.DB, clientID, secret, redirectURI string) (*models.OauthClient, error) {
-	return s.createClientCommon(tx, clientID, secret, redirectURI)
+// CreateClientTx saves a new client to database using injected db object.
+func (s *Service) CreateClientTx(tx *gorm.DB, clientID, secret, redirectURI, tokenEndpointAuthMethod string) (*models.OauthClient, error) {
+	return s.createClientCommon(tx, clientID, secret, redirectURI, tokenEndpointAuthMethod)
 }
 
 // AuthClient authenticates client
@@ -68,16 +73,29 @@ func (s *Service) AuthClient(clientID, secret string) (*models.OauthClient, erro
 	return client, nil
 }
 
-func (s *Service) createClientCommon(db *gorm.DB, clientID, secret, redirectURI string) (*models.OauthClient, error) {
+func (s *Service) createClientCommon(db *gorm.DB, clientID, secret, redirectURI, tokenEndpointAuthMethod string) (*models.OauthClient, error) {
 	// Check client ID
 	if s.ClientExists(clientID) {
 		return nil, ErrClientIDTaken
 	}
 
-	// Hash password
-	secretHash, err := password.HashPassword(secret)
-	if err != nil {
-		return nil, err
+	if !ValidAuthMethod(tokenEndpointAuthMethod) {
+		return nil, ErrInvalidAuthMethod
+	}
+	method := tokenEndpointAuthMethod
+	if method == "" {
+		method = AuthMethodSecretBasic
+	}
+
+	// `none` clients have no secret; for the other methods we hash whatever
+	// secret was provided (empty string is allowed but won't authenticate).
+	var secretHash []byte
+	if method != AuthMethodNone {
+		var err error
+		secretHash, err = password.HashPassword(secret)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	client := &models.OauthClient{
@@ -85,9 +103,10 @@ func (s *Service) createClientCommon(db *gorm.DB, clientID, secret, redirectURI 
 			ID:        uuid.New(),
 			CreatedAt: time.Now().UTC(),
 		},
-		Key:         strings.ToLower(clientID),
-		Secret:      string(secretHash),
-		RedirectURI: util.StringOrNull(redirectURI),
+		Key:                     strings.ToLower(clientID),
+		Secret:                  string(secretHash),
+		RedirectURI:             util.StringOrNull(redirectURI),
+		TokenEndpointAuthMethod: method,
 	}
 	if err := db.Create(client).Error; err != nil {
 		return nil, err

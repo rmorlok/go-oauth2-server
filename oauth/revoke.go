@@ -24,7 +24,7 @@ func (s *Service) revokeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := s.basicAuthClient(r)
+	client, err := s.authenticateClient(r)
 	if err != nil {
 		response.UnauthorizedError(w, err.Error())
 		return

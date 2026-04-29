@@ -15,6 +15,12 @@ type OauthClient struct {
 	Key         string         `sql:"type:varchar(254);unique;not null"`
 	Secret      string         `sql:"type:varchar(60);not null"`
 	RedirectURI sql.NullString `sql:"type:varchar(200)"`
+
+	// TokenEndpointAuthMethod is one of "client_secret_basic" (default),
+	// "client_secret_post", or "none" (public clients with PKCE).
+	// Empty string is treated as the default for backwards compatibility
+	// with rows created before this column existed.
+	TokenEndpointAuthMethod string `sql:"type:varchar(32);default:'client_secret_basic'"`
 }
 
 // TableName specifies table name

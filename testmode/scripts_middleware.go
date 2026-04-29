@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/RichardKnop/go-oauth2-server/log"
+	"github.com/RichardKnop/go-oauth2-server/oauth"
 )
 
 // scriptMiddleware applies queued Actions to incoming requests bound for
@@ -52,17 +53,22 @@ func (m *scriptMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, nex
 		return
 	}
 
-	// Pass-through with scope_override: run the real handler, then rewrite
-	// the JSON `scope` field on the way out.
-	if action.Status == 0 && action.ScopeOverride != nil {
-		applyScopeOverride(w, r, next, *action.ScopeOverride)
-		return
-	}
-
-	// Pass-through without overrides: ignore (let handler run).
-	if action.Status == 0 && action.Body == "" {
-		next(w, r)
-		return
+	// Pass-through actions: stamp PKCE-skip onto the request context if
+	// requested, then run the real handler (possibly with scope rewrite).
+	if action.Status == 0 {
+		if action.SkipPKCECheck {
+			r = r.WithContext(oauth.WithSkipPKCE(r.Context()))
+		}
+		if action.ScopeOverride != nil {
+			applyScopeOverride(w, r, next, *action.ScopeOverride)
+			return
+		}
+		if action.Body == "" {
+			next(w, r)
+			return
+		}
+		// fall through to full-replacement path below — body without
+		// status implies a 200 with that body.
 	}
 
 	// Full replacement.

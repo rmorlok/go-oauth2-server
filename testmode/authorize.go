@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/RichardKnop/go-oauth2-server/log"
 	"github.com/RichardKnop/go-oauth2-server/models"
 	"github.com/RichardKnop/go-oauth2-server/oauth"
 	"github.com/RichardKnop/go-oauth2-server/util/response"
@@ -59,12 +58,6 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request) {
 	if req.Decision != "approve" && req.Decision != "deny" {
 		response.Error(w, `decision must be "approve" or "deny"`, http.StatusBadRequest)
 		return
-	}
-
-	if req.CodeChallenge != "" || req.CodeChallengeMethod != "" {
-		log.INFO.Printf("testmode: /test/authorize received code_challenge=%q method=%q "+
-			"(accepted but not yet enforced; see PR-7)",
-			req.CodeChallenge, req.CodeChallengeMethod)
 	}
 
 	client, err := s.oauthService.FindClientByClientID(req.ClientID)
@@ -121,9 +114,17 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request) {
 		s.cnf.Oauth.AuthCodeLifetime,
 		req.RedirectURI,
 		resolvedScope,
+		req.CodeChallenge,
+		req.CodeChallengeMethod,
 	)
 	if err != nil {
-		response.Error(w, "granting authorization code: "+err.Error(), http.StatusInternalServerError)
+		// PKCE input errors are user errors → 400; everything else → 500.
+		switch err {
+		case oauth.ErrPKCEInvalidRequest, oauth.ErrPKCEMethodUnsupported:
+			response.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			response.Error(w, "granting authorization code: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 

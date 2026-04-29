@@ -1170,6 +1170,223 @@ func TestResourceServer(t *testing.T) {
 	})
 }
 
+func TestPKCE(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	mustPostJSON(t, srv.URL+"/test/clients", map[string]string{
+		"key":          "pkce-client",
+		"secret":       "pkce-secret",
+		"redirect_uri": "https://app.example.com/cb",
+	})
+	userBody := mustPostJSON(t, srv.URL+"/test/users", map[string]string{
+		"username": "ivy@example.com",
+		"password": "hunter22",
+	})
+	var user struct{ ID string }
+	json.Unmarshal(userBody, &user)
+
+	authorize := func(t *testing.T, body map[string]any) (status int, redirect string, raw []byte) {
+		t.Helper()
+		buf, _ := json.Marshal(body)
+		resp, err := http.Post(srv.URL+"/test/authorize", "application/json", bytes.NewReader(buf))
+		if err != nil {
+			t.Fatalf("authorize: %v", err)
+		}
+		raw, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			var r struct{ RedirectURL string `json:"redirect_url"` }
+			json.Unmarshal(raw, &r)
+			redirect = r.RedirectURL
+		}
+		return resp.StatusCode, redirect, raw
+	}
+
+	exchange := func(t *testing.T, code string, extras url.Values) (status int, body []byte) {
+		t.Helper()
+		form := url.Values{}
+		form.Set("grant_type", "authorization_code")
+		form.Set("code", code)
+		form.Set("redirect_uri", "https://app.example.com/cb")
+		for k, vs := range extras {
+			for _, v := range vs {
+				form.Add(k, v)
+			}
+		}
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("pkce-client", "pkce-secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("exchange: %v", err)
+		}
+		body, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, body
+	}
+
+	codeFromRedirect := func(t *testing.T, redirect string) string {
+		t.Helper()
+		u, _ := url.Parse(redirect)
+		c := u.Query().Get("code")
+		if c == "" {
+			t.Fatalf("no code in redirect %s", redirect)
+		}
+		return c
+	}
+
+	const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	// S256(verifier) = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+	const s256Challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
+	t.Run("S256 happy path: matching verifier exchanges successfully", func(t *testing.T) {
+		_, redirect, raw := authorize(t, map[string]any{
+			"client_id":             "pkce-client",
+			"user_id":               user.ID,
+			"redirect_uri":          "https://app.example.com/cb",
+			"scope":                 "read",
+			"decision":              "approve",
+			"code_challenge":        s256Challenge,
+			"code_challenge_method": "S256",
+		})
+		if redirect == "" {
+			t.Fatalf("no redirect: %s", raw)
+		}
+		code := codeFromRedirect(t, redirect)
+		status, body := exchange(t, code, url.Values{"code_verifier": []string{verifier}})
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("S256 mismatch: invalid_grant", func(t *testing.T) {
+		_, redirect, _ := authorize(t, map[string]any{
+			"client_id":             "pkce-client",
+			"user_id":               user.ID,
+			"redirect_uri":          "https://app.example.com/cb",
+			"scope":                 "read",
+			"decision":              "approve",
+			"code_challenge":        s256Challenge,
+			"code_challenge_method": "S256",
+		})
+		code := codeFromRedirect(t, redirect)
+		status, body := exchange(t, code, url.Values{"code_verifier": []string{"WRONG-VERIFIER"}})
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", status, body)
+		}
+		if !strings.Contains(string(body), "code_verifier") {
+			t.Fatalf("expected error mentioning code_verifier, got %s", body)
+		}
+	})
+
+	t.Run("missing verifier when challenge stored: invalid_request", func(t *testing.T) {
+		_, redirect, _ := authorize(t, map[string]any{
+			"client_id":             "pkce-client",
+			"user_id":               user.ID,
+			"redirect_uri":          "https://app.example.com/cb",
+			"scope":                 "read",
+			"decision":              "approve",
+			"code_challenge":        s256Challenge,
+			"code_challenge_method": "S256",
+		})
+		code := codeFromRedirect(t, redirect)
+		status, body := exchange(t, code, nil)
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("plain method works", func(t *testing.T) {
+		_, redirect, _ := authorize(t, map[string]any{
+			"client_id":             "pkce-client",
+			"user_id":               user.ID,
+			"redirect_uri":          "https://app.example.com/cb",
+			"scope":                 "read",
+			"decision":              "approve",
+			"code_challenge":        verifier, // for plain, challenge == verifier
+			"code_challenge_method": "plain",
+		})
+		code := codeFromRedirect(t, redirect)
+		status, body := exchange(t, code, url.Values{"code_verifier": []string{verifier}})
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 for plain match, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("no PKCE: spurious verifier is ignored", func(t *testing.T) {
+		_, redirect, _ := authorize(t, map[string]any{
+			"client_id":    "pkce-client",
+			"user_id":      user.ID,
+			"redirect_uri": "https://app.example.com/cb",
+			"scope":        "read",
+			"decision":     "approve",
+		})
+		code := codeFromRedirect(t, redirect)
+		// Send a verifier even though no challenge was stored — should still succeed.
+		status, body := exchange(t, code, url.Values{"code_verifier": []string{"WHATEVER"}})
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 (no PKCE → spurious verifier ignored), got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("unknown method rejected at /test/authorize", func(t *testing.T) {
+		status, _, body := authorize(t, map[string]any{
+			"client_id":             "pkce-client",
+			"user_id":               user.ID,
+			"redirect_uri":          "https://app.example.com/cb",
+			"scope":                 "read",
+			"decision":              "approve",
+			"code_challenge":        s256Challenge,
+			"code_challenge_method": "S512",
+		})
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("method without challenge rejected", func(t *testing.T) {
+		status, _, body := authorize(t, map[string]any{
+			"client_id":             "pkce-client",
+			"user_id":               user.ID,
+			"redirect_uri":          "https://app.example.com/cb",
+			"scope":                 "read",
+			"decision":              "approve",
+			"code_challenge_method": "S256",
+		})
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("script skip_pkce_check bypasses verifier check", func(t *testing.T) {
+		_, redirect, _ := authorize(t, map[string]any{
+			"client_id":             "pkce-client",
+			"user_id":               user.ID,
+			"redirect_uri":          "https://app.example.com/cb",
+			"scope":                 "read",
+			"decision":              "approve",
+			"code_challenge":        s256Challenge,
+			"code_challenge_method": "S256",
+		})
+		code := codeFromRedirect(t, redirect)
+
+		// Script a pass-through with skip_pkce_check on the next token call.
+		buf, _ := json.Marshal(map[string]any{
+			"client_id": "pkce-client",
+			"endpoint":  "token",
+			"actions":   []map[string]any{{"skip_pkce_check": true}},
+		})
+		http.Post(srv.URL+"/test/scripts", "application/json", bytes.NewReader(buf))
+
+		// Send a wrong verifier; should still succeed because of the override.
+		status, body := exchange(t, code, url.Values{"code_verifier": []string{"WRONG-VERIFIER"}})
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 with skip_pkce_check, got %d body=%s", status, body)
+		}
+	})
+}
+
 func mustGet(t *testing.T, u string) *http.Response {
 	t.Helper()
 	resp, err := http.Get(u)

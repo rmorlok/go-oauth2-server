@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/RichardKnop/go-oauth2-server/models"
+	"github.com/RichardKnop/go-oauth2-server/util"
 )
 
 var (
@@ -14,10 +15,20 @@ var (
 	ErrAuthorizationCodeExpired = errors.New("Authorization code expired")
 )
 
-// GrantAuthorizationCode grants a new authorization code
-func (s *Service) GrantAuthorizationCode(client *models.OauthClient, user *models.OauthUser, expiresIn int, redirectURI, scope string) (*models.OauthAuthorizationCode, error) {
-	// Create a new authorization code
+// GrantAuthorizationCode grants a new authorization code. codeChallenge
+// and codeChallengeMethod implement RFC 7636 PKCE; both empty means the
+// request did not opt into PKCE.
+func (s *Service) GrantAuthorizationCode(client *models.OauthClient, user *models.OauthUser, expiresIn int, redirectURI, scope, codeChallenge, codeChallengeMethod string) (*models.OauthAuthorizationCode, error) {
+	resolvedMethod, err := validateChallengeAtAuthorize(codeChallenge, codeChallengeMethod)
+	if err != nil {
+		return nil, err
+	}
+
 	authorizationCode := models.NewOauthAuthorizationCode(client, user, expiresIn, redirectURI, scope)
+	if codeChallenge != "" {
+		authorizationCode.CodeChallenge = util.StringOrNull(codeChallenge)
+		authorizationCode.CodeChallengeMethod = util.StringOrNull(resolvedMethod)
+	}
 	if err := s.db.Create(authorizationCode).Error; err != nil {
 		return nil, err
 	}

@@ -75,4 +75,3 @@ func (s *Service) resourcePolicyHandler(w http.ResponseWriter, r *http.Request) 
 	s.resourcePolicies.set(req.Path, req.RequiredScope)
 	response.NoContent(w)
 }
-

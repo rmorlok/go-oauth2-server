@@ -81,4 +81,3 @@ func (s *Service) introspectHandler(w http.ResponseWriter, r *http.Request) {
 	// Write response to json
 	response.WriteJSON(w, resp, 200)
 }
-

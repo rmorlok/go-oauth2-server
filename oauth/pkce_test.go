@@ -28,60 +28,60 @@ func TestVerifyPKCESpuriousVerifier(t *testing.T) {
 	strictClient := &models.OauthClient{RequirePKCE: true}
 
 	cases := []struct {
-		name    string
-		code    *models.OauthAuthorizationCode
-		client  *models.OauthClient
+		name     string
+		code     *models.OauthAuthorizationCode
+		client   *models.OauthClient
 		verifier string
-		want    error
+		want     error
 	}{
 		{
-			name:    "lax client, no challenge, no verifier → ok",
-			code:    codeWithoutChallenge,
-			client:  laxClient,
+			name:     "lax client, no challenge, no verifier → ok",
+			code:     codeWithoutChallenge,
+			client:   laxClient,
 			verifier: "",
-			want:    nil,
+			want:     nil,
 		},
 		{
-			name:    "lax client, no challenge, spurious verifier → ok (RFC §4.5)",
-			code:    codeWithoutChallenge,
-			client:  laxClient,
+			name:     "lax client, no challenge, spurious verifier → ok (RFC §4.5)",
+			code:     codeWithoutChallenge,
+			client:   laxClient,
 			verifier: "anything",
-			want:    nil,
+			want:     nil,
 		},
 		{
-			name:    "strict client, no challenge, no verifier → ok (transition case)",
-			code:    codeWithoutChallenge,
-			client:  strictClient,
+			name:     "strict client, no challenge, no verifier → ok (transition case)",
+			code:     codeWithoutChallenge,
+			client:   strictClient,
 			verifier: "",
-			want:    nil,
+			want:     nil,
 		},
 		{
-			name:    "strict client, no challenge, spurious verifier → rejected",
-			code:    codeWithoutChallenge,
-			client:  strictClient,
+			name:     "strict client, no challenge, spurious verifier → rejected",
+			code:     codeWithoutChallenge,
+			client:   strictClient,
 			verifier: "anything",
-			want:    ErrPKCEVerifierUnexpected,
+			want:     ErrPKCEVerifierUnexpected,
 		},
 		{
-			name:    "strict client, challenge stored, missing verifier → missing",
-			code:    codeWithChallenge,
-			client:  strictClient,
+			name:     "strict client, challenge stored, missing verifier → missing",
+			code:     codeWithChallenge,
+			client:   strictClient,
 			verifier: "",
-			want:    ErrPKCEVerifierMissing,
+			want:     ErrPKCEVerifierMissing,
 		},
 		{
-			name:    "lax client, challenge stored, matching verifier → ok",
-			code:    codeWithChallenge,
-			client:  laxClient,
+			name:     "lax client, challenge stored, matching verifier → ok",
+			code:     codeWithChallenge,
+			client:   laxClient,
 			verifier: "abc",
-			want:    nil,
+			want:     nil,
 		},
 		{
-			name:    "nil client behaves as lax (e.g. legacy callsites)",
-			code:    codeWithoutChallenge,
-			client:  nil,
+			name:     "nil client behaves as lax (e.g. legacy callsites)",
+			code:     codeWithoutChallenge,
+			client:   nil,
 			verifier: "anything",
-			want:    nil,
+			want:     nil,
 		},
 	}
 

@@ -20,7 +20,13 @@ This service implements [OAuth 2.0 specification](https://tools.ietf.org/html/rf
     * [Resource Owner Password Credentials](#resource-owner-password-credentials)
     * [Client Credentials](#client-credentials)
   * [Refreshing An Access Token](#refreshing-an-access-token)
+  * [Refresh Token Rotation](#refresh-token-rotation)
   * [Token Introspection](#token-introspection)
+  * [Token Revocation](#token-revocation)
+  * [Userinfo](#userinfo)
+  * [PKCE (RFC 7636)](#pkce-rfc-7636)
+  * [Per-Client Auth Methods (RFC 7591)](#per-client-auth-methods-rfc-7591)
+* [Test Mode](#test-mode)
 * [Plugins](#plugins)
 * [Session Storage](#session-storage)
 * [Dependencies](#dependencies)
@@ -341,6 +347,18 @@ If valid and authorized, the authorization server issues an access token.
 
 The authorization server MAY issue a new refresh token, in which case the client MUST discard the old refresh token and replace it with the new refresh token.  The authorization server MAY revoke the old refresh token after issuing a new refresh token to the client.  If a new refresh token is issued, the refresh token scope MUST be identical to that of the refresh token included by the client in the request.
 
+### Refresh Token Rotation
+
+The server supports refresh-token rotation. When the `Oauth.RefreshTokenRotation` config flag is `true`, every `grant_type=refresh_token` exchange:
+
+* issues a brand-new access AND refresh token,
+* atomically marks the prior refresh token revoked in the same DB transaction (CAS update on `revoked_at`), so concurrent refreshes deterministically race — exactly one wins; the others receive `400` with `{"error":"Refresh token revoked"}`,
+* records `parent_id` on the new RT so the chain can be inspected.
+
+Replaying a rotated refresh token is rejected. When rotation is off (the production default for backwards compatibility), refresh tokens are reused as before.
+
+In test mode the flag defaults to `true` and can be flipped at runtime via `POST /test/refresh-tokens/rotate-policy` (see [Test Mode](#test-mode)).
+
 ### Token Introspection
 
 https://tools.ietf.org/html/rfc7662
@@ -365,6 +383,104 @@ The authorization server responds meta-information about a token.
   "token_type": "Bearer",
   "exp": 1454868090
 }
+```
+
+### Token Revocation
+
+https://tools.ietf.org/html/rfc7009
+
+Clients can revoke their own access or refresh tokens via `POST /v1/oauth/revoke`.
+
+```sh
+curl -v localhost:8080/v1/oauth/revoke \
+	-u test_client_1:test_secret \
+	-d "token=00ccd40e-72ca-4e79-a4b6-67c95e2e3f1c" \
+	-d "token_type_hint=access_token"
+```
+
+Per RFC 7009 §2.2 the endpoint returns `200` with an empty body for unknown tokens, already-revoked tokens, and tokens that belong to a different client. Authentication failures return `401` with `WWW-Authenticate: Bearer`. Unsupported `token_type_hint` values return `400 unsupported_token_type`.
+
+Revoking a refresh token cascades: every unrevoked access token associated with the same `(client_id, user_id)` pair is also marked revoked, so a downstream `Authenticate` (or resource-server check, or userinfo call) immediately returns `401 invalid_token`.
+
+### Userinfo
+
+`GET /v1/oauth/userinfo` (also `POST` per RFC 7662) returns identity claims for the user the access token represents. The token must include either `profile` or `email` in its scope; tokens without one of those scopes receive `403 insufficient_scope`. `client_credentials` tokens (no associated user) also receive `403`.
+
+```sh
+curl -v localhost:8080/v1/oauth/userinfo \
+	-H "Authorization: Bearer 00ccd40e-72ca-4e79-a4b6-67c95e2e3f1c"
+```
+
+```json
+{
+  "sub": "user-uuid-or-override",
+  "email": "alice@example.com",
+  "preferred_username": "alice@example.com",
+  "name": "Alice"
+}
+```
+
+Empty fields are omitted from the response. To populate `email` and `name` in production, run `loaddata` against a fixture that sets them on `oauth_users.email` / `oauth_users.display_name`. To populate them in test mode, see [`POST /test/users`](docs/test_mode_api.md#post-testusers) and [`POST /test/users/{id}/identity`](docs/test_mode_api.md#post-testusersididentity).
+
+### PKCE (RFC 7636)
+
+The authorization-code grant supports PKCE. When the client supplies `code_challenge` (and optionally `code_challenge_method`) at the authorize step, the value is persisted on the auth-code row; at exchange time the server requires a matching `code_verifier`.
+
+* `code_challenge_method` may be `S256` (recommended) or `plain`. Anything else is rejected.
+* `code_challenge_method` set without `code_challenge` is rejected (`invalid_request`).
+* If a code has no challenge stored, any `code_verifier` is ignored by default (RFC §4.5).
+
+A per-client `RequirePKCE` flag (column on `oauth_clients`) extends strict PKCE: a missing `code_challenge` at authorize is rejected, and a spurious `code_verifier` against a code with no stored challenge is rejected. Public clients (`token_endpoint_auth_method=none`) have `RequirePKCE` set to `true` automatically at registration.
+
+### Per-Client Auth Methods (RFC 7591)
+
+The token endpoint supports three client authentication methods, configured per-client via the `token_endpoint_auth_method` column on `oauth_clients`:
+
+| method | request shape |
+|---|---|
+| `client_secret_basic` (default) | HTTP Basic on the token endpoint |
+| `client_secret_post` | form `client_id` + `client_secret` |
+| `none` | form `client_id` only; PKCE required on the `authorization_code` grant |
+
+Mismatched styles are rejected with `401 invalid_client`. The same rules apply at `/v1/oauth/introspect` and `/v1/oauth/revoke`.
+
+## Test Mode
+
+For integration-test scenarios the server exposes a headless test-provider mode. Run with `--test-mode`:
+
+```sh
+go-oauth2-server runserver --test-mode
+```
+
+This boots the server with no etcd / consul dependency, an embedded SQLite database, and a `/test/*` control plane that lets test harnesses register clients and users, drive the authorize step programmatically, script arbitrary token / refresh / revoke / resource responses, inspect requests with secret-redacted snapshots, and simulate identity changes mid-session.
+
+Quick start:
+
+```sh
+# Boot the server
+go-oauth2-server runserver --test-mode --test-port 8080 &
+
+# Register a client
+curl -s -X POST localhost:8080/test/clients \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"acme","secret":"s3cret","redirect_uri":"https://app.example.com/cb"}'
+
+# Register a user
+curl -s -X POST localhost:8080/test/users \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice@example.com","password":"hunter22","email":"alice@example.com"}'
+
+# Now the standard /v1/oauth/* endpoints work
+curl -s -u acme:s3cret localhost:8080/v1/oauth/tokens \
+  -d 'grant_type=client_credentials&scope=read'
+```
+
+The full API reference for every `/test/*` endpoint, including request and response payloads, action shape for the script queue, body templates, recorder semantics, and the test-mode-specific behavior toggles, lives in [`docs/test_mode_api.md`](docs/test_mode_api.md).
+
+`/test/resource/{path}` is a sample protected resource that is mounted in **both** modes (production and test mode) so an operator can manually validate an OAuth flow against a real protected endpoint:
+
+```sh
+curl -v -H "Authorization: Bearer <access-token>" localhost:8080/test/resource/foo
 ```
 
 ## Plugins
@@ -575,14 +691,26 @@ go-oauth2-server --configBackend consul migrate
 go-oauth2-server --configBackend consul runserver
 ```
 
+The `runserver` command also accepts test-mode flags. When `--test-mode` is set, the etcd / consul / postgres setup above is skipped — the server boots with an embedded SQLite database and an in-memory config. See [Test Mode](#test-mode) for details.
+
+```sh
+go-oauth2-server runserver --test-mode \
+  [--test-port 8080] \
+  [--test-db-path :memory:]
+```
+
 ## Testing
 
-I have used a mix of unit and functional tests so you need to have `sqlite` installed in order for the tests to run successfully as the suite creates an in-memory database.
-
-To run tests:
+A mix of unit and functional tests; SQLite is required for the in-memory test databases.
 
 ```sh
 make test
+```
+
+In addition to the package-level tests there is an end-to-end integration suite at [`integration/`](integration) that exercises every `/test/*` endpoint and the standard OAuth flows through HTTP, plus a binary-mode smoke test that runs `runserver --test-mode` via `go build` + `os/exec`. The suite has 30 spec-mapped scenario tests; see [`docs/integration_test_gaps.md`](docs/integration_test_gaps.md) for any documented boundaries between server-side coverage and proxy-side responsibilities.
+
+```sh
+go test ./integration/...
 ```
 
 ## Docker

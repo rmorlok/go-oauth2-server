@@ -7,7 +7,6 @@ import (
 	"github.com/RichardKnop/go-oauth2-server/oauth"
 	"github.com/RichardKnop/go-oauth2-server/web"
 	"github.com/gorilla/mux"
-	"github.com/phyber/negroni-gzip/gzip"
 	"github.com/urfave/negroni"
 )
 
@@ -18,11 +17,15 @@ import (
 //
 // Middleware order:
 //
-//	recovery → logger → recorder → script → gzip → static → router
+//	recovery → logger → recorder → script → static → router
 //
-// Recorder and script middlewares sit BEFORE gzip so script-injected
-// responses and hijacked connections (drop_connection actions) bypass
-// the gzip writer wrap.
+// gzip is intentionally absent: it would wrap the response writer
+// downstream of the script middleware, breaking pass-through actions
+// (e.g. scope_override) that need to parse the handler's JSON body
+// and breaking drop_connection (gzip's writer doesn't implement
+// http.Hijacker). Test mode is a controllable test provider, not a
+// perf-sensitive endpoint, so the gzip overhead doesn't earn its
+// keep here. Production runserver keeps gzip in cmd/run_server.go.
 //
 // Routes:
 //
@@ -41,7 +44,6 @@ func BuildTestApp(
 	app.Use(negroni.NewLogger())
 	app.Use(testService.Middleware())
 	app.Use(testService.ScriptMiddleware())
-	app.Use(gzip.Gzip(gzip.DefaultCompression))
 	app.Use(negroni.NewStatic(http.Dir("public")))
 
 	router := mux.NewRouter()

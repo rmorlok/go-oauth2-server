@@ -3,68 +3,93 @@ package integration_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/RichardKnop/go-oauth2-server/testmode"
 )
 
-// TestScenario01_StandardOAuthFlow — Phase 1 stub.
+// TestScenario01_StandardOAuthFlow exercises the spec's "Standard
+// Successful OAuth Flow" end-to-end: register, authorize-with-PKCE,
+// exchange, call protected resource, inspect recorder.
 //
-// Phase 1 (#27): asserts the harness boots and the basic helper chain
-// works (register client + user, run /test/health, exercise the
-// recorder + queue plumbing). Full PKCE + S256 + resource round-trip
-// happy-path coverage lands in Phase 2 (#28).
-//
-// Spec: P0 scenario 1 — "Standard Successful OAuth Flow".
+// Spec: P0 scenario 1.
 func TestScenario01_StandardOAuthFlow(t *testing.T) {
 	ts := newTestServer(t)
 
-	// /test/health round-trip — the simplest "the server is alive" check.
-	resp, err := http.Get(ts.URL + "/test/health")
+	c := registerClient(t, ts, "scn01", "scn01-secret", "https://app.example.com/cb")
+	u := registerUser(t, ts, "scn01@example.com", "hunter22")
+
+	verifier, challenge := pkcePair()
+
+	redirectURL := authorize(t, ts, "approve", authorizeParams{
+		Client:              c,
+		User:                u,
+		Scope:               "read",
+		State:               "spec-scn-01",
+		CodeChallenge:       challenge,
+		CodeChallengeMethod: "S256",
+	})
+
+	// Sanity-check the redirect: state echoed, code present.
+	parsed, err := url.Parse(redirectURL)
 	if err != nil {
-		t.Fatalf("health: %v", err)
+		t.Fatalf("parse redirect: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("health expected 200, got %d", resp.StatusCode)
+	if parsed.Host != "app.example.com" || parsed.Path != "/cb" {
+		t.Fatalf("unexpected redirect host/path: %s", redirectURL)
 	}
-	var hb map[string]string
-	json.NewDecoder(resp.Body).Decode(&hb)
-	if hb["status"] != "ok" || hb["mode"] != "test" {
-		t.Fatalf("unexpected health body: %v", hb)
+	if got := parsed.Query().Get("state"); got != "spec-scn-01" {
+		t.Fatalf("expected state=spec-scn-01, got %q", got)
 	}
 
-	// Helper chain: register a client + user, run a password grant, hit
-	// the sample resource. Phase 2 will replace this with the full
-	// authorization-code + PKCE flow.
-	c := registerClient(t, ts, "scn1", "scn1-secret", "https://app.example.com/cb")
-	if c.ID == "" || c.Key != "scn1" {
-		t.Fatalf("unexpected registered client: %+v", c)
-	}
+	code := extractCode(t, redirectURL)
 
-	registerUser(t, ts, "scn1@example.com", "hunter22",
-		userOpts{Email: "scn1@example.com", DisplayName: "Scenario One"})
-
-	status, tok, body := passwordGrant(t, ts, c, "scn1@example.com", "hunter22", "read")
+	status, tok, body := exchangeCode(t, ts, c, code, exchangeOpts{CodeVerifier: verifier})
 	if status != http.StatusOK {
-		t.Fatalf("password grant expected 200, got %d body=%s", status, body)
+		t.Fatalf("exchange expected 200, got %d body=%s", status, body)
 	}
-	if tok.AccessToken == "" || tok.RefreshToken == "" || tok.TokenType != "Bearer" {
-		t.Fatalf("unexpected token response: %+v", tok)
+	if tok.AccessToken == "" {
+		t.Fatalf("missing access_token in %s", body)
+	}
+	if tok.RefreshToken == "" {
+		t.Fatalf("missing refresh_token in %s", body)
+	}
+	if tok.TokenType != "Bearer" {
+		t.Fatalf("expected token_type=Bearer, got %q", tok.TokenType)
+	}
+	if tok.Scope != "read" {
+		t.Fatalf("expected scope=read, got %q", tok.Scope)
+	}
+	if tok.ExpiresIn <= 0 {
+		t.Fatalf("expected positive expires_in, got %d", tok.ExpiresIn)
 	}
 
-	rstatus, _, rbody := callResource(t, ts, tok.AccessToken, "/test/resource/health-check")
+	rstatus, _, rbody := callResource(t, ts, tok.AccessToken, "/test/resource/foo")
 	if rstatus != http.StatusOK {
 		t.Fatalf("resource expected 200, got %d body=%s", rstatus, rbody)
 	}
+	var doc map[string]any
+	if err := json.Unmarshal(rbody, &doc); err != nil {
+		t.Fatalf("decode resource body: %v body=%s", err, rbody)
+	}
+	if doc["path"] != "/test/resource/foo" || doc["scope"] != "read" {
+		t.Fatalf("unexpected resource body: %+v", doc)
+	}
 
-	// Recorder picked up the token call; this proves BuildTestApp wired
-	// the recorder middleware into the chain correctly.
+	// Recorder should show the token request with Authorization redacted.
 	entries := ts.Recorder.Snapshot(testmode.SnapshotFilter{Endpoint: "token"})
 	if len(entries) == 0 {
 		t.Fatalf("expected recorded token request")
 	}
-	if got := entries[0].Headers["Authorization"]; got != "Basic <redacted>" {
-		t.Fatalf("expected Basic <redacted>, got %q", got)
+	got := entries[0]
+	if got.Headers["Authorization"] != "Basic <redacted>" {
+		t.Fatalf("expected Basic <redacted>, got %q", got.Headers["Authorization"])
+	}
+	if got.ClientID != "scn01" {
+		t.Fatalf("expected recorded client_id=scn01, got %q", got.ClientID)
+	}
+	if v := got.Form["code_verifier"]; len(v) != 1 || v[0] != "<redacted>" {
+		t.Fatalf("expected code_verifier redacted, got %v", v)
 	}
 }

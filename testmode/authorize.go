@@ -51,10 +51,6 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, "client_id is required", http.StatusBadRequest)
 		return
 	}
-	if req.RedirectURI == "" {
-		response.Error(w, "redirect_uri is required", http.StatusBadRequest)
-		return
-	}
 	if req.Decision != "approve" && req.Decision != "deny" {
 		response.Error(w, `decision must be "approve" or "deny"`, http.StatusBadRequest)
 		return
@@ -66,15 +62,22 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate redirect_uri against the registered URI when one is set.
-	if client.RedirectURI.Valid && client.RedirectURI.String != "" {
-		if client.RedirectURI.String != req.RedirectURI {
-			response.Error(w, "redirect_uri does not match registered URI", http.StatusBadRequest)
+	// Resolve redirect_uri: fall back to the client's registered URI
+	// when the request omits it (mirrors /web/authorize behavior). When
+	// both are present, they must match.
+	redirectURI := req.RedirectURI
+	if redirectURI == "" {
+		if !client.RedirectURI.Valid || client.RedirectURI.String == "" {
+			response.Error(w, "redirect_uri is required (client has no registered URI)", http.StatusBadRequest)
 			return
 		}
+		redirectURI = client.RedirectURI.String
+	} else if client.RedirectURI.Valid && client.RedirectURI.String != "" && client.RedirectURI.String != redirectURI {
+		response.Error(w, "redirect_uri does not match registered URI", http.StatusBadRequest)
+		return
 	}
 
-	redirectURL, err := url.Parse(req.RedirectURI)
+	redirectURL, err := url.Parse(redirectURI)
 	if err != nil {
 		response.Error(w, "invalid redirect_uri: "+err.Error(), http.StatusBadRequest)
 		return
@@ -112,7 +115,7 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request) {
 		client,
 		user,
 		s.cnf.Oauth.AuthCodeLifetime,
-		req.RedirectURI,
+		redirectURI,
 		resolvedScope,
 		req.CodeChallenge,
 		req.CodeChallengeMethod,

@@ -24,7 +24,8 @@ func TestScenario30_ClockSkew(t *testing.T) {
 	// Mutate the in-memory config so the next token is issued with a
 	// 1-second access-token lifetime. Each scenario test runs against
 	// its own server instance (fresh config) so this doesn't leak
-	// across scenarios.
+	// across scenarios. A per-request lifetime override would be
+	// cleaner; see docs/integration_test_gaps.md row "per-request-lifetime".
 	cnf := ts.OauthService.GetConfig()
 	cnf.Oauth.AccessTokenLifetime = 1
 

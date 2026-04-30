@@ -20,6 +20,7 @@ import (
 // are independent (one per Login call) so the broader-scope assertion
 // holds at the access-token layer; we don't assert anything specific
 // about the second-flow refresh token's scope.
+// See docs/integration_test_gaps.md row "fresh-rt-per-auth".
 //
 // Spec: P2 scenario 25.
 func TestScenario25_IncrementalAuthorization(t *testing.T) {

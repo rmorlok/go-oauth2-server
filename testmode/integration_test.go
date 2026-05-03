@@ -164,6 +164,117 @@ func TestTestModeBootstrap(t *testing.T) {
 	})
 }
 
+// TestPerTestScopeRegistration covers issue #44: the `scope` field on
+// POST /test/clients is now an idempotent upsert into oauth_scopes,
+// not a no-op log line. Tests can register arbitrary scope names
+// (write, admin, etc.) instead of being limited to the four seeded
+// scopes (read, read_write, profile, email).
+func TestPerTestScopeRegistration(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	registerUser := func(t *testing.T, username, password string) string {
+		t.Helper()
+		buf, _ := json.Marshal(map[string]string{"username": username, "password": password})
+		resp, _ := http.Post(srv.URL+"/test/users", "application/json", bytes.NewReader(buf))
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var u struct{ ID string }
+		json.Unmarshal(body, &u)
+		return u.ID
+	}
+
+	registerClientWithScope := func(t *testing.T, key, secret, scope string) {
+		t.Helper()
+		buf, _ := json.Marshal(map[string]string{
+			"key":          key,
+			"secret":       secret,
+			"redirect_uri": "https://app.example.com/cb",
+			"scope":        scope,
+		})
+		resp, err := http.Post(srv.URL+"/test/clients", "application/json", bytes.NewReader(buf))
+		if err != nil {
+			t.Fatalf("create client: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201 creating %q with scope=%q, got %d body=%s", key, scope, resp.StatusCode, body)
+		}
+	}
+
+	authorizeWithScope := func(t *testing.T, clientKey, userID, scope string) (status int, body []byte) {
+		t.Helper()
+		buf, _ := json.Marshal(map[string]any{
+			"client_id":    clientKey,
+			"user_id":      userID,
+			"redirect_uri": "https://app.example.com/cb",
+			"scope":        scope,
+			"decision":     "approve",
+		})
+		resp, err := http.Post(srv.URL+"/test/authorize", "application/json", bytes.NewReader(buf))
+		if err != nil {
+			t.Fatalf("authorize: %v", err)
+		}
+		body, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, body
+	}
+
+	uid := registerUser(t, "scope-issue-44@example.com", "hunter22")
+
+	t.Run("arbitrary scope names register and become usable at authorize", func(t *testing.T) {
+		// Sanity: before registration, "write" is not in the seed and
+		// authorize must fail.
+		registerClientWithScope(t, "scope-pre", "scope-pre-secret", "")
+		if status, body := authorizeWithScope(t, "scope-pre", uid, "write"); status == http.StatusOK {
+			t.Fatalf("baseline: expected authorize with un-seeded scope=write to fail, got 200 body=%s", body)
+		}
+
+		// Register a client that declares "write" and "admin" in its
+		// scope field. Both should be upserted into oauth_scopes.
+		registerClientWithScope(t, "scope-c1", "scope-c1-secret", "write admin")
+
+		// Now any client (including the previously-registered one) can
+		// authorize with the new scopes — registration is global, not
+		// per-client, since oauth_scopes is a flat table.
+		if status, body := authorizeWithScope(t, "scope-c1", uid, "write"); status != http.StatusOK {
+			t.Fatalf("authorize with newly-registered scope=write expected 200, got %d body=%s", status, body)
+		}
+		if status, body := authorizeWithScope(t, "scope-c1", uid, "admin"); status != http.StatusOK {
+			t.Fatalf("authorize with newly-registered scope=admin expected 200, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("re-registering the same scope is idempotent", func(t *testing.T) {
+		// Two clients both declaring "write" should both succeed; the
+		// second is a no-op for the scope row but still registers the
+		// client.
+		registerClientWithScope(t, "scope-c2", "scope-c2-secret", "write")
+		registerClientWithScope(t, "scope-c3", "scope-c3-secret", "write admin")
+	})
+
+	t.Run("declaring a seeded scope is a no-op", func(t *testing.T) {
+		// "read" is in the seed; declaring it again must not error.
+		registerClientWithScope(t, "scope-c4", "scope-c4-secret", "read")
+		if status, body := authorizeWithScope(t, "scope-c4", uid, "read"); status != http.StatusOK {
+			t.Fatalf("authorize with seeded scope=read expected 200, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("multiple whitespace-delimited tokens are handled", func(t *testing.T) {
+		// Mix of new and seeded, with extra whitespace. Each token should
+		// upsert independently; the seeded ones are no-ops.
+		registerClientWithScope(t, "scope-c5", "scope-c5-secret", "  read   custom_a   custom_b ")
+		if status, body := authorizeWithScope(t, "scope-c5", uid, "custom_a"); status != http.StatusOK {
+			t.Fatalf("authorize with custom_a expected 200, got %d body=%s", status, body)
+		}
+		if status, body := authorizeWithScope(t, "scope-c5", uid, "custom_b"); status != http.StatusOK {
+			t.Fatalf("authorize with custom_b expected 200, got %d body=%s", status, body)
+		}
+	})
+}
+
 func TestProductionModeOmitsTestRoutes(t *testing.T) {
 	app := newTestApp(t, false)
 	resp := mustGet(t, app.server.URL+"/test/health")

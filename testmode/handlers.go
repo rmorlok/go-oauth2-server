@@ -3,11 +3,14 @@ package testmode
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
+	"time"
 
-	"github.com/RichardKnop/go-oauth2-server/log"
+	"github.com/RichardKnop/go-oauth2-server/models"
 	"github.com/RichardKnop/go-oauth2-server/oauth/roles"
 	"github.com/RichardKnop/go-oauth2-server/util"
 	"github.com/RichardKnop/go-oauth2-server/util/response"
+	"github.com/RichardKnop/uuid"
 )
 
 type createClientRequest struct {
@@ -15,7 +18,10 @@ type createClientRequest struct {
 	Secret      string `json:"secret"`
 	RedirectURI string `json:"redirect_uri"`
 
-	// Accepted but not yet enforced; reserved for PR-3.
+	// Scope is a space-delimited list of scope names. Each token is
+	// upserted into oauth_scopes (idempotent on the unique scope
+	// column, is_default=false) so the client may immediately request
+	// it at /test/authorize. Already-seeded scopes are no-ops.
 	Scope string `json:"scope,omitempty"`
 
 	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method,omitempty"`
@@ -30,6 +36,37 @@ type clientResponse struct {
 	RequirePKCE             bool   `json:"require_pkce,omitempty"`
 }
 
+// registerScopes upserts each space-delimited token from `raw` into
+// oauth_scopes (idempotent on the unique scope column). Empty input
+// is a no-op. New rows are created with is_default=false; the default
+// flag belongs to the seed.
+//
+// Implementation note: explicit find-then-create rather than gorm v1's
+// FirstOrCreate because FirstOrCreate keys off the destination's
+// primary key when set, and we'd be passing a freshly-generated UUID
+// every call — that misses the already-stored row and the subsequent
+// Create trips the unique constraint on `scope`.
+func (s *Service) registerScopes(raw string) error {
+	for _, tok := range strings.Fields(raw) {
+		var existing models.OauthScope
+		if !s.db.Where("scope = ?", tok).First(&existing).RecordNotFound() {
+			continue
+		}
+		sc := models.OauthScope{
+			MyGormModel: models.MyGormModel{
+				ID:        uuid.New(),
+				CreatedAt: time.Now().UTC(),
+			},
+			Scope:     tok,
+			IsDefault: false,
+		}
+		if err := s.db.Create(&sc).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) createClient(w http.ResponseWriter, r *http.Request) {
 	var req createClientRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -40,9 +77,9 @@ func (s *Service) createClient(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, "key is required", http.StatusBadRequest)
 		return
 	}
-	if req.Scope != "" {
-		log.INFO.Printf("testmode: /test/clients received scope=%q (accepted but not yet enforced; see PR-3)",
-			req.Scope)
+	if err := s.registerScopes(req.Scope); err != nil {
+		response.Error(w, "registering scope: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	client, err := s.oauthService.CreateClient(req.Key, req.Secret, req.RedirectURI, req.TokenEndpointAuthMethod, req.RequirePKCE)

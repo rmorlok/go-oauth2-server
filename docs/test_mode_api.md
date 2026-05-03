@@ -130,7 +130,7 @@ Register an OAuth client. Test-mode only.
                                                 //   "client_secret_post"
                                                 //   "none"
   "require_pkce": false,                        // optional; auto-set true for `none`
-  "scope": "string"                             // optional; accepted but currently unused
+  "scope": "string"                             // optional; space-delimited list of scope names to register
 }
 ```
 
@@ -145,6 +145,15 @@ clients: a missing `code_challenge` at authorize is rejected, and a
 spurious `code_verifier` at the token endpoint (against a code with
 no stored challenge) is rejected. RFC 7636 §4.5 lax behavior is the
 default for confidential clients.
+
+`scope` is upserted into the global `oauth_scopes` table — each
+whitespace-delimited token becomes a row (`is_default=false`) if not
+already present. Idempotent on the unique `scope` column; declaring
+already-seeded names like `read` is a no-op. This lets tests use
+semantically meaningful scope names (`write`, `admin`, etc.) without
+being limited to the four seeded scopes (`read`, `read_write`,
+`profile`, `email`). Registration is global rather than per-client;
+once a scope exists, any client may request it at `/test/authorize`.
 
 **Response 201**
 

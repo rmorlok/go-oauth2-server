@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/RichardKnop/go-oauth2-server/log"
 	"github.com/RichardKnop/go-oauth2-server/models"
 	"github.com/RichardKnop/go-oauth2-server/services"
+	"github.com/RichardKnop/go-oauth2-server/telemetry"
 	"github.com/RichardKnop/go-oauth2-server/testmode"
 	"github.com/RichardKnop/go-oauth2-server/util/migrations"
 	"gopkg.in/tylerb/graceful.v1"
@@ -39,6 +41,16 @@ func RunTestServer(dbPath string, port int) error {
 	if err := testmode.Seed(db); err != nil {
 		return fmt.Errorf("seeding default roles/scopes: %w", err)
 	}
+
+	providers, err := telemetry.Init(context.Background(), cnf.Telemetry)
+	if err != nil {
+		return fmt.Errorf("initialising telemetry: %w", err)
+	}
+	defer func() {
+		if err := providers.Shutdown(context.Background()); err != nil {
+			log.ERROR.Printf("telemetry shutdown: %v", err)
+		}
+	}()
 
 	if err := services.Init(cnf, db); err != nil {
 		return fmt.Errorf("initialising services: %w", err)

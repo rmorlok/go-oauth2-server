@@ -1,5 +1,9 @@
 package config
 
+import (
+	"github.com/RichardKnop/go-oauth2-server/telemetry"
+)
+
 // DatabaseConfig stores database connection options
 type DatabaseConfig struct {
 	Type         string
@@ -45,5 +49,6 @@ type Config struct {
 	Database      DatabaseConfig
 	Oauth         OauthConfig
 	Session       SessionConfig
+	Telemetry     telemetry.Config
 	IsDevelopment bool
 }

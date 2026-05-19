@@ -3,6 +3,7 @@ package oauth
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/RichardKnop/go-oauth2-server/models"
 	"github.com/RichardKnop/go-oauth2-server/oauth/tokentypes"
@@ -13,7 +14,19 @@ var (
 	ErrInvalidUsernameOrPassword = errors.New("Invalid username or password")
 )
 
-func (s *Service) passwordGrant(r *http.Request, client *models.OauthClient) (*AccessTokenResponse, error) {
+func (s *Service) passwordGrant(r *http.Request, client *models.OauthClient) (resp *AccessTokenResponse, err error) {
+	ctx, span := s.telem.StartGrant(r.Context(), "password")
+	defer span.End()
+	s.telem.SetClient(span, client.Key)
+	start := time.Now()
+	defer func() {
+		s.telem.RecordGrantDuration(ctx, "password", start, err)
+		if err != nil {
+			s.telem.FinishWithError(span, err, oauthErrorCode(err))
+		} else if resp != nil {
+			s.telem.SetScope(span, resp.Scope)
+		}
+	}()
 	// Get the scope string
 	scope, err := s.GetScope(r.Form.Get("scope"))
 	if err != nil {

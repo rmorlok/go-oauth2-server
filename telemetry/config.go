@@ -36,7 +36,16 @@ type Config struct {
 	Signals  Signals  `json:"signals"`
 	HTTP     HTTP     `json:"http"`
 	Database Database `json:"database,omitempty"`
+	OAuth    OAuth    `json:"oauth,omitempty"`
 	Shutdown Shutdown `json:"shutdown"`
+}
+
+// OAuth holds telemetry settings specific to the OAuth lifecycle.
+// IncludeClientID controls whether the oauth.client_id label appears on
+// counters; deployments with very high client cardinality can disable it.
+// A nil pointer means "use default" (true).
+type OAuth struct {
+	IncludeClientID *bool `json:"include_client_id,omitempty"`
 }
 
 // Database holds telemetry settings specific to database/sql instrumentation.
@@ -99,7 +108,15 @@ func (c *Config) ApplyDefaults() {
 	c.applySamplingDefaults()
 	c.applySignalDefaults()
 	c.applyHTTPDefaults()
+	c.applyOAuthDefaults()
 	c.applyShutdownDefaults()
+}
+
+func (c *Config) applyOAuthDefaults() {
+	if c.OAuth.IncludeClientID == nil {
+		v := true
+		c.OAuth.IncludeClientID = &v
+	}
 }
 
 func (c *Config) applyResourceDefaults() {

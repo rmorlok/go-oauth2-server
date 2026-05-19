@@ -35,7 +35,16 @@ type Config struct {
 	Sampling Sampling `json:"sampling"`
 	Signals  Signals  `json:"signals"`
 	HTTP     HTTP     `json:"http"`
+	Database Database `json:"database,omitempty"`
 	Shutdown Shutdown `json:"shutdown"`
+}
+
+// Database holds telemetry settings specific to database/sql instrumentation.
+type Database struct {
+	// DisableStatement omits db.statement from emitted spans entirely.
+	// Useful for deployments where even parameterized SQL is considered
+	// sensitive. Bind values are never captured regardless of this setting.
+	DisableStatement bool `json:"disable_statement,omitempty"`
 }
 
 // Exporter describes the OTLP exporter configuration. Empty fields are

@@ -19,21 +19,27 @@ var ErrUnsupportedTokenType = errors.New("unsupported_token_type")
 // hint is malformed: unknown tokens, already-revoked tokens, and tokens
 // belonging to a different client are all silently swallowed.
 func (s *Service) revokeHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.telem.StartRevoke(r.Context())
+	defer span.End()
+	r = r.WithContext(ctx)
+
 	if err := r.ParseForm(); err != nil {
+		s.telem.FinishWithError(span, err, "invalid_request")
 		response.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	client, err := s.authenticateClient(r)
 	if err != nil {
+		s.telem.FinishWithError(span, err, "invalid_client")
 		response.UnauthorizedError(w, err.Error())
 		return
 	}
+	s.telem.SetClient(span, client.Key)
 
 	token := r.Form.Get("token")
 	if token == "" {
-		// RFC 7009 doesn't strictly require this, but invalid_request is
-		// the standard response when a required parameter is missing.
+		s.telem.FinishWithError(span, ErrTokenMissing, "invalid_request")
 		response.Error(w, ErrTokenMissing.Error(), http.StatusBadRequest)
 		return
 	}
@@ -43,18 +49,18 @@ func (s *Service) revokeHandler(w http.ResponseWriter, r *http.Request) {
 	case "", AccessTokenHint, RefreshTokenHint:
 		// fine
 	default:
+		s.telem.FinishWithError(span, ErrUnsupportedTokenType, "unsupported_token_type")
 		response.Error(w, ErrUnsupportedTokenType.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if err := s.RevokeToken(token, hint, client); err != nil {
-		// Should not happen for the normal "not-found / wrong-client"
-		// paths — those return nil. A non-nil error here is a real DB or
-		// internal failure.
+		s.telem.FinishWithError(span, err, "server_error")
 		response.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	s.telem.RecordTokenRevoked(ctx, client.Key, hint)
 	w.WriteHeader(http.StatusOK)
 }
 

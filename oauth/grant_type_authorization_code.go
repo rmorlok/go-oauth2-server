@@ -3,6 +3,7 @@ package oauth
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/RichardKnop/go-oauth2-server/models"
 	"github.com/RichardKnop/go-oauth2-server/oauth/tokentypes"
@@ -13,7 +14,19 @@ var (
 	ErrInvalidRedirectURI = errors.New("Invalid redirect URI")
 )
 
-func (s *Service) authorizationCodeGrant(r *http.Request, client *models.OauthClient) (*AccessTokenResponse, error) {
+func (s *Service) authorizationCodeGrant(r *http.Request, client *models.OauthClient) (resp *AccessTokenResponse, err error) {
+	ctx, span := s.telem.StartGrant(r.Context(), "authorization_code")
+	defer span.End()
+	s.telem.SetClient(span, client.Key)
+	start := time.Now()
+	defer func() {
+		s.telem.RecordGrantDuration(ctx, "authorization_code", start, err)
+		if err != nil {
+			s.telem.FinishWithError(span, err, oauthErrorCode(err))
+		} else if resp != nil {
+			s.telem.SetScope(span, resp.Scope)
+		}
+	}()
 	// Fetch the authorization code
 	authorizationCode, err := s.getValidAuthorizationCode(
 		r.Form.Get("code"),

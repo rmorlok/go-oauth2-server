@@ -2,12 +2,25 @@ package oauth
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/RichardKnop/go-oauth2-server/models"
 	"github.com/RichardKnop/go-oauth2-server/oauth/tokentypes"
 )
 
-func (s *Service) refreshTokenGrant(r *http.Request, client *models.OauthClient) (*AccessTokenResponse, error) {
+func (s *Service) refreshTokenGrant(r *http.Request, client *models.OauthClient) (resp *AccessTokenResponse, err error) {
+	ctx, span := s.telem.StartGrant(r.Context(), "refresh_token")
+	defer span.End()
+	s.telem.SetClient(span, client.Key)
+	start := time.Now()
+	defer func() {
+		s.telem.RecordGrantDuration(ctx, "refresh_token", start, err)
+		if err != nil {
+			s.telem.FinishWithError(span, err, oauthErrorCode(err))
+		} else if resp != nil {
+			s.telem.SetScope(span, resp.Scope)
+		}
+	}()
 	// Fetch the refresh token
 	theRefreshToken, err := s.GetValidRefreshToken(r.Form.Get("refresh_token"), client)
 	if err != nil {

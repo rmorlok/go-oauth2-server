@@ -63,6 +63,7 @@ func RunTestServer(dbPath string, port int) error {
 		services.OauthService,
 		services.WebService,
 		testService,
+		cnf.Telemetry,
 	)
 
 	addr := fmt.Sprintf(":%d", port)

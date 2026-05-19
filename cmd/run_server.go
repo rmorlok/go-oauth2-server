@@ -8,6 +8,7 @@ import (
 	"github.com/RichardKnop/go-oauth2-server/log"
 	"github.com/RichardKnop/go-oauth2-server/services"
 	"github.com/RichardKnop/go-oauth2-server/telemetry"
+	"github.com/RichardKnop/go-oauth2-server/telemetry/httptelem"
 	"github.com/gorilla/mux"
 	"github.com/phyber/negroni-gzip/gzip"
 	"github.com/urfave/negroni"
@@ -47,6 +48,10 @@ func RunServer(configBackend string) error {
 
 	// Create a router instance
 	router := mux.NewRouter()
+
+	// Telemetry middleware runs inside the mux chain so the matched
+	// route template is available for span naming and metric labels.
+	router.Use(httptelem.Middleware(cnf.Telemetry))
 
 	// Add routes
 	services.HealthService.RegisterRoutes(router, "/v1")

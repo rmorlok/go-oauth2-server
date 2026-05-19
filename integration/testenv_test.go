@@ -65,7 +65,7 @@ func newTestServer(t *testing.T) *testServer {
 	webService := web.NewService(cnf, oauthService, sessionService)
 	testService := testmode.NewService(cnf, db, oauthService)
 
-	handler := testmode.BuildTestApp(healthService, oauthService, webService, testService)
+	handler := testmode.BuildTestApp(healthService, oauthService, webService, testService, cnf.Telemetry)
 	httpSrv := httptest.NewServer(handler)
 
 	ts := &testServer{

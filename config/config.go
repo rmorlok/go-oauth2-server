@@ -44,11 +44,25 @@ type SessionConfig struct {
 	HTTPOnly bool
 }
 
+// LoggingConfig configures the structured logger.
+//
+// Level is one of "debug", "info", "warn", "error" (case-insensitive). An
+// empty Level defaults to "info" in production and "debug" when
+// IsDevelopment is true.
+//
+// Format is "text" or "json". An empty Format defaults to "text" when
+// IsDevelopment is true and "json" otherwise.
+type LoggingConfig struct {
+	Level  string `json:"level,omitempty"`
+	Format string `json:"format,omitempty"`
+}
+
 // Config stores all configuration options
 type Config struct {
 	Database      DatabaseConfig
 	Oauth         OauthConfig
 	Session       SessionConfig
 	Telemetry     telemetry.Config
+	Logging       LoggingConfig
 	IsDevelopment bool
 }

@@ -87,7 +87,7 @@ func (b *etcdBackend) RefreshConfig(newCnf *Config) {
 
 func newEtcdClient(theEndpoints, certFile, keyFile, caFile string) (*clientv3.Client, error) {
 	// Log the etcd endpoint for debugging purposes
-	log.INFO.Printf("ETCD Endpoints: %s", theEndpoints)
+	log.Info("etcd config backend", "endpoints", theEndpoints)
 
 	// ETCD config
 	etcdConfig := clientv3.Config{

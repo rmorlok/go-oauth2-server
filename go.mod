@@ -5,8 +5,8 @@ go 1.25.7
 require (
 	github.com/RichardKnop/go-fixtures v0.0.0-20181101035649-15577dcaa372
 	github.com/RichardKnop/jsonhal v0.0.0-20181101035658-9ef775cfa6bf
-	github.com/RichardKnop/logging v0.0.0-20181101035820-b1d5d44c82d6
 	github.com/RichardKnop/uuid v0.0.0-20160216163710-c55201b03606
+	github.com/XSAM/otelsql v0.42.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/context v1.1.2
 	github.com/gorilla/mux v1.8.1
@@ -43,7 +43,6 @@ require (
 )
 
 require (
-	github.com/XSAM/otelsql v0.42.0 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

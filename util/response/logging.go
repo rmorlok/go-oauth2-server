@@ -1,25 +1,26 @@
 package response
 
 import (
-	"fmt"
-	"log"
+	stdlog "log"
 	"net/http"
 	"os"
 	"time"
 
-	thelog "github.com/RichardKnop/go-oauth2-server/log"
+	"github.com/RichardKnop/go-oauth2-server/log"
 	"github.com/urfave/negroni"
 )
 
-// Logger is a middleware handler that logs the request as it goes in and the response as it goes out.
+// Logger is a middleware handler that logs the request as it goes in and
+// the response as it goes out. It keeps the embedded *stdlog.Logger field
+// for backwards compatibility with callers that constructed it directly;
+// the actual log records go through the package slog logger.
 type Logger struct {
-	// Logger inherits from log.Logger used to log messages with the Logger middleware
-	*log.Logger
+	*stdlog.Logger
 }
 
-// NewURLLogger returns a new Logger instance
+// NewURLLogger returns a new Logger instance.
 func NewURLLogger() *Logger {
-	return &Logger{log.New(os.Stdout, "[negroni] ", 0)}
+	return &Logger{stdlog.New(os.Stdout, "[negroni] ", 0)}
 }
 
 func (l *Logger) ServeHTTP(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
@@ -29,20 +30,25 @@ func (l *Logger) ServeHTTP(rw http.ResponseWriter, r *http.Request, next http.Ha
 		ip = xff
 	}
 
-	thelog.INFO.Printf("Started %s %s for %s", r.Method, r.URL.Path, ip)
+	logger := log.FromContext(r.Context())
+	logger.Info("request started", "method", r.Method, "path", r.URL.Path, "client_ip", ip)
 
 	next(rw, r)
 
 	res := rw.(negroni.ResponseWriter)
-
-	msg := fmt.Sprintf("Finished %s %s : %v %s in %v", r.Method, r.URL.Path, res.Status(), http.StatusText(res.Status()), time.Since(start))
-
+	status := res.Status()
+	args := []any{
+		"method", r.Method,
+		"path", r.URL.Path,
+		"status", status,
+		"duration_ms", float64(time.Since(start)) / float64(time.Millisecond),
+	}
 	switch {
-	case res.Status() < 400:
-		thelog.INFO.Print(msg)
-	case res.Status() < 500:
-		thelog.WARNING.Print(msg)
+	case status < 400:
+		logger.Info("request finished", args...)
+	case status < 500:
+		logger.Warn("request finished", args...)
 	default:
-		thelog.ERROR.Print(msg)
+		logger.Error("request finished", args...)
 	}
 }

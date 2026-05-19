@@ -19,11 +19,11 @@ func Bootstrap(db *gorm.DB) error {
 	exists := nil == db.Where("name = ?", migrationName).First(migration).Error
 
 	if exists {
-		log.INFO.Printf("Skipping %s migration", migrationName)
+		log.Info("skipping migration", "name", migrationName)
 		return nil
 	}
 
-	log.INFO.Printf("Running %s migration", migrationName)
+	log.Info("running migration", "name", migrationName)
 
 	// Create migrations table
 	if err := db.CreateTable(new(Migration)).Error; err != nil {

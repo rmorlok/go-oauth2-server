@@ -40,13 +40,13 @@ func (m *scriptMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, nex
 	if action.DropConnection {
 		hj, ok := w.(http.Hijacker)
 		if !ok {
-			log.ERROR.Print("testmode: drop_connection requested but writer is not a Hijacker")
+			log.Error("testmode: drop_connection requested but writer is not a Hijacker")
 			http.Error(w, "drop_connection unsupported on this writer", http.StatusInternalServerError)
 			return
 		}
 		conn, _, err := hj.Hijack()
 		if err != nil {
-			log.ERROR.Printf("testmode: hijack failed: %v", err)
+			log.Error("testmode: hijack failed", "err", err)
 			return
 		}
 		_ = conn.Close()

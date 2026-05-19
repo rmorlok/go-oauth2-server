@@ -23,13 +23,19 @@ func RunServer(configBackend string) error {
 	}
 	defer db.Close()
 
+	log.Init(log.Options{
+		Level:         cnf.Logging.Level,
+		Format:        log.Format(cnf.Logging.Format),
+		IsDevelopment: cnf.IsDevelopment,
+	})
+
 	providers, err := telemetry.Init(context.Background(), cnf.Telemetry)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if err := providers.Shutdown(context.Background()); err != nil {
-			log.ERROR.Printf("telemetry shutdown: %v", err)
+			log.Error("telemetry shutdown failed", "err", err)
 		}
 	}()
 

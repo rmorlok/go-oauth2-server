@@ -5,6 +5,8 @@ import (
 
 	"github.com/RichardKnop/go-oauth2-server/health"
 	"github.com/RichardKnop/go-oauth2-server/oauth"
+	"github.com/RichardKnop/go-oauth2-server/telemetry"
+	"github.com/RichardKnop/go-oauth2-server/telemetry/httptelem"
 	"github.com/RichardKnop/go-oauth2-server/web"
 	"github.com/gorilla/mux"
 	"github.com/urfave/negroni"
@@ -38,6 +40,7 @@ func BuildTestApp(
 	oauthService oauth.ServiceInterface,
 	webService web.ServiceInterface,
 	testService *Service,
+	telemetryCfg telemetry.Config,
 ) http.Handler {
 	app := negroni.New()
 	app.Use(negroni.NewRecovery())
@@ -47,6 +50,10 @@ func BuildTestApp(
 	app.Use(negroni.NewStatic(http.Dir("public")))
 
 	router := mux.NewRouter()
+	// Telemetry middleware runs inside the mux chain so the matched
+	// route template is available for span naming and metric labels.
+	router.Use(httptelem.Middleware(telemetryCfg))
+
 	healthService.RegisterRoutes(router, "/v1")
 	oauthService.RegisterRoutes(router, "/v1/oauth")
 	webService.RegisterRoutes(router, "/web")

@@ -7,23 +7,44 @@ import (
 	"time"
 
 	"github.com/RichardKnop/go-oauth2-server/log"
-	"github.com/urfave/negroni"
+	"github.com/gorilla/mux"
 )
 
-// Logger is a middleware handler that logs the request as it goes in and
-// the response as it goes out. It keeps the embedded *stdlog.Logger field
-// for backwards compatibility with callers that constructed it directly;
-// the actual log records go through the package slog logger.
+// Logger is the legacy negroni-style URL access logger. It is kept for
+// backwards-compatibility; new code should use NewURLLoggerMiddleware
+// (a mux middleware) so the log record can pick up the OTel span from
+// r.Context() and inherit trace_id / span_id.
 type Logger struct {
 	*stdlog.Logger
 }
 
-// NewURLLogger returns a new Logger instance.
+// NewURLLogger returns a Logger configured for use as a negroni middleware.
 func NewURLLogger() *Logger {
 	return &Logger{stdlog.New(os.Stdout, "[negroni] ", 0)}
 }
 
 func (l *Logger) ServeHTTP(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	sr := &statusWriter{ResponseWriter: rw, status: http.StatusOK}
+	logRequest(sr, r, next.ServeHTTP)
+}
+
+// URLLoggerMiddleware returns a mux.MiddlewareFunc that emits structured
+// "request started" / "request finished" records via the package slog
+// logger.
+//
+// Mount via router.Use(...) AFTER any tracing middleware so r.Context()
+// carries the active span and the slog handler can stamp trace_id /
+// span_id onto each record.
+func URLLoggerMiddleware() mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sr := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+			logRequest(sr, r, next.ServeHTTP)
+		})
+	}
+}
+
+func logRequest(w *statusWriter, r *http.Request, next http.HandlerFunc) {
 	start := time.Now()
 	ip := r.RemoteAddr
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
@@ -31,12 +52,12 @@ func (l *Logger) ServeHTTP(rw http.ResponseWriter, r *http.Request, next http.Ha
 	}
 
 	logger := log.FromContext(r.Context())
-	logger.Info("request started", "method", r.Method, "path", r.URL.Path, "client_ip", ip)
+	logger.InfoContext(r.Context(), "request started",
+		"method", r.Method, "path", r.URL.Path, "client_ip", ip)
 
-	next(rw, r)
+	next(w, r)
 
-	res := rw.(negroni.ResponseWriter)
-	status := res.Status()
+	status := w.status
 	args := []any{
 		"method", r.Method,
 		"path", r.URL.Path,
@@ -45,10 +66,33 @@ func (l *Logger) ServeHTTP(rw http.ResponseWriter, r *http.Request, next http.Ha
 	}
 	switch {
 	case status < 400:
-		logger.Info("request finished", args...)
+		logger.InfoContext(r.Context(), "request finished", args...)
 	case status < 500:
-		logger.Warn("request finished", args...)
+		logger.WarnContext(r.Context(), "request finished", args...)
 	default:
-		logger.Error("request finished", args...)
+		logger.ErrorContext(r.Context(), "request finished", args...)
 	}
+}
+
+// statusWriter wraps an http.ResponseWriter to capture the status code so
+// the URL logger can include it on the "request finished" record.
+type statusWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (s *statusWriter) WriteHeader(code int) {
+	if !s.wroteHeader {
+		s.status = code
+		s.wroteHeader = true
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusWriter) Write(b []byte) (int, error) {
+	if !s.wroteHeader {
+		s.wroteHeader = true
+	}
+	return s.ResponseWriter.Write(b)
 }

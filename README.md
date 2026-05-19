@@ -27,6 +27,7 @@ This service implements [OAuth 2.0 specification](https://tools.ietf.org/html/rf
   * [PKCE (RFC 7636)](#pkce-rfc-7636)
   * [Per-Client Auth Methods (RFC 7591)](#per-client-auth-methods-rfc-7591)
 * [Test Mode](#test-mode)
+* [Telemetry](#telemetry)
 * [Plugins](#plugins)
 * [Session Storage](#session-storage)
 * [Dependencies](#dependencies)
@@ -482,6 +483,25 @@ The full API reference for every `/test/*` endpoint, including request and respo
 ```sh
 curl -v -H "Authorization: Bearer <access-token>" localhost:8080/test/resource/foo
 ```
+
+## Telemetry
+
+`go-oauth2-server` emits OpenTelemetry traces, metrics, and logs over
+OTLP. Coverage spans inbound HTTP, GORM-driven SQL, and the OAuth2
+lifecycle (token issuance, introspection, revocation, userinfo) with
+matching domain counters and a `oauth.grant.duration` histogram. Logs
+flow through `log/slog`, optionally shipped to the same collector and
+stamped with `trace_id` / `span_id` for cross-signal correlation.
+
+Telemetry is **default-off** — deployments see zero behavioral change
+on upgrade until they opt in via the `Telemetry.Enabled` config flag
+(or `OTEL_*` env vars). A bundled `docker compose --profile observability`
+stack (Grafana + Tempo + Loki + Prometheus + Collector) gives
+contributors a one-command path to seeing all three signals locally.
+
+See [`docs/telemetry.md`](docs/telemetry.md) for the full configuration
+schema, metric catalog, OAuth lifecycle attributes, and the local dev
+stack instructions.
 
 ## Plugins
 

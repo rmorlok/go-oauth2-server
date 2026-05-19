@@ -21,6 +21,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	otellog "go.opentelemetry.io/otel/log"
 )
 
 // Format identifies the output encoder for the slog handler.
@@ -55,6 +58,22 @@ type Options struct {
 	// AddSource adds source file + line info to each record. Defaults to
 	// IsDevelopment so prod logs stay compact.
 	AddSource bool
+
+	// OTelProvider, when non-nil, routes log records through the OTel
+	// logs SDK (via contrib/bridges/otelslog) in addition to the console
+	// handler. Operators see records both on stdout and over OTLP.
+	OTelProvider otellog.LoggerProvider
+
+	// OTelScope is the instrumentation scope name passed to otelslog.
+	// Empty defaults to "github.com/RichardKnop/go-oauth2-server".
+	OTelScope string
+
+	// IncludeTraceContext attaches trace_id / span_id from each record's
+	// context to the record itself when the active span context is valid.
+	// A nil pointer defaults to true when OTelProvider is non-nil; false
+	// otherwise. Set explicitly when you want trace correlation in logs
+	// even though the OTel logs SDK isn't wired in.
+	IncludeTraceContext *bool
 }
 
 var (
@@ -149,14 +168,38 @@ func buildLogger(o Options) *slog.Logger {
 
 	handlerOpts := &slog.HandlerOptions{Level: level, AddSource: addSource}
 
-	var h slog.Handler
+	var console slog.Handler
 	switch format {
 	case FormatJSON:
-		h = slog.NewJSONHandler(out, handlerOpts)
+		console = slog.NewJSONHandler(out, handlerOpts)
 	default:
-		h = slog.NewTextHandler(out, handlerOpts)
+		console = slog.NewTextHandler(out, handlerOpts)
+	}
+
+	handlers := []slog.Handler{console}
+	if o.OTelProvider != nil {
+		scope := o.OTelScope
+		if scope == "" {
+			scope = "github.com/RichardKnop/go-oauth2-server"
+		}
+		handlers = append(handlers, otelslog.NewHandler(scope,
+			otelslog.WithLoggerProvider(o.OTelProvider),
+		))
+	}
+
+	var h slog.Handler = newTeeHandler(handlers...)
+
+	if shouldIncludeTraceContext(o) {
+		h = newTraceHandler(h)
 	}
 	return slog.New(h)
+}
+
+func shouldIncludeTraceContext(o Options) bool {
+	if o.IncludeTraceContext != nil {
+		return *o.IncludeTraceContext
+	}
+	return o.OTelProvider != nil
 }
 
 func resolveLevel(o Options) slog.Level {

@@ -26,12 +26,6 @@ import (
 func RunTestServer(dbPath string, port int) error {
 	cnf := testmode.NewConfig(dbPath)
 
-	log.Init(log.Options{
-		Level:         cnf.Logging.Level,
-		Format:        log.Format(cnf.Logging.Format),
-		IsDevelopment: cnf.IsDevelopment,
-	})
-
 	db, err := database.NewDatabase(cnf)
 	if err != nil {
 		return fmt.Errorf("opening sqlite database at %q: %w", dbPath, err)
@@ -57,6 +51,16 @@ func RunTestServer(dbPath string, port int) error {
 			log.Error("telemetry shutdown failed", "err", err)
 		}
 	}()
+
+	logOpts := log.Options{
+		Level:         cnf.Logging.Level,
+		Format:        log.Format(cnf.Logging.Format),
+		IsDevelopment: cnf.IsDevelopment,
+	}
+	if cnf.Telemetry.Enabled && cnf.Telemetry.Signals.Logs != nil && *cnf.Telemetry.Signals.Logs {
+		logOpts.OTelProvider = providers.LoggerProvider
+	}
+	log.Init(logOpts)
 
 	if err := services.Init(cnf, db); err != nil {
 		return fmt.Errorf("initialising services: %w", err)

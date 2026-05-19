@@ -9,6 +9,7 @@ import (
 	"github.com/RichardKnop/go-oauth2-server/services"
 	"github.com/RichardKnop/go-oauth2-server/telemetry"
 	"github.com/RichardKnop/go-oauth2-server/telemetry/httptelem"
+	"github.com/RichardKnop/go-oauth2-server/util/response"
 	"github.com/gorilla/mux"
 	"github.com/phyber/negroni-gzip/gzip"
 	"github.com/urfave/negroni"
@@ -23,12 +24,6 @@ func RunServer(configBackend string) error {
 	}
 	defer db.Close()
 
-	log.Init(log.Options{
-		Level:         cnf.Logging.Level,
-		Format:        log.Format(cnf.Logging.Format),
-		IsDevelopment: cnf.IsDevelopment,
-	})
-
 	providers, err := telemetry.Init(context.Background(), cnf.Telemetry)
 	if err != nil {
 		return err
@@ -39,25 +34,38 @@ func RunServer(configBackend string) error {
 		}
 	}()
 
+	logOpts := log.Options{
+		Level:         cnf.Logging.Level,
+		Format:        log.Format(cnf.Logging.Format),
+		IsDevelopment: cnf.IsDevelopment,
+	}
+	if cnf.Telemetry.Enabled && cnf.Telemetry.Signals.Logs != nil && *cnf.Telemetry.Signals.Logs {
+		logOpts.OTelProvider = providers.LoggerProvider
+	}
+	log.Init(logOpts)
+
 	// start the services
 	if err := services.Init(cnf, db); err != nil {
 		return err
 	}
 	defer services.Close()
 
-	// Start a classic negroni app
+	// Start a classic negroni app. The URL access logger has moved into
+	// the mux chain (below) so each record can pick up the OTel span
+	// from r.Context() and inherit trace_id / span_id.
 	app := negroni.New()
 	app.Use(negroni.NewRecovery())
-	app.Use(negroni.NewLogger())
 	app.Use(gzip.Gzip(gzip.DefaultCompression))
 	app.Use(negroni.NewStatic(http.Dir("public")))
 
 	// Create a router instance
 	router := mux.NewRouter()
 
-	// Telemetry middleware runs inside the mux chain so the matched
-	// route template is available for span naming and metric labels.
+	// Telemetry middleware runs first inside the mux chain so the matched
+	// route template is available for span naming, metric labels, and
+	// downstream log records.
 	router.Use(httptelem.Middleware(cnf.Telemetry))
+	router.Use(response.URLLoggerMiddleware())
 
 	// Add routes
 	services.HealthService.RegisterRoutes(router, "/v1")

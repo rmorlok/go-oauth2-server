@@ -7,6 +7,7 @@ import (
 	"github.com/RichardKnop/go-oauth2-server/oauth"
 	"github.com/RichardKnop/go-oauth2-server/telemetry"
 	"github.com/RichardKnop/go-oauth2-server/telemetry/httptelem"
+	"github.com/RichardKnop/go-oauth2-server/util/response"
 	"github.com/RichardKnop/go-oauth2-server/web"
 	"github.com/gorilla/mux"
 	"github.com/urfave/negroni"
@@ -44,15 +45,18 @@ func BuildTestApp(
 ) http.Handler {
 	app := negroni.New()
 	app.Use(negroni.NewRecovery())
-	app.Use(negroni.NewLogger())
+	// URL access logging has moved into the mux chain (below) so each
+	// record can pick up the OTel span from r.Context().
 	app.Use(testService.Middleware())
 	app.Use(testService.ScriptMiddleware())
 	app.Use(negroni.NewStatic(http.Dir("public")))
 
 	router := mux.NewRouter()
-	// Telemetry middleware runs inside the mux chain so the matched
-	// route template is available for span naming and metric labels.
+	// Telemetry middleware runs first inside the mux chain so the matched
+	// route template is available for span naming, metric labels, and
+	// downstream log records.
 	router.Use(httptelem.Middleware(telemetryCfg))
+	router.Use(response.URLLoggerMiddleware())
 
 	healthService.RegisterRoutes(router, "/v1")
 	oauthService.RegisterRoutes(router, "/v1/oauth")

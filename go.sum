@@ -6,8 +6,6 @@ github.com/RichardKnop/go-fixtures v0.0.0-20181101035649-15577dcaa372 h1:4FzE0f0
 github.com/RichardKnop/go-fixtures v0.0.0-20181101035649-15577dcaa372/go.mod h1:AkkGIv1ar1WtAmNGXaqm3YeK4qXD/GhrqhaLctZIjQE=
 github.com/RichardKnop/jsonhal v0.0.0-20181101035658-9ef775cfa6bf h1:1n7tsV2Q74ijZ6iNhGHMXiTBXd8u0GHw2O8TYAE98Rs=
 github.com/RichardKnop/jsonhal v0.0.0-20181101035658-9ef775cfa6bf/go.mod h1:U7RHiK+fkCwB9FD8SXVwXqxjfvex2K3euQUyCv4Y+yI=
-github.com/RichardKnop/logging v0.0.0-20181101035820-b1d5d44c82d6 h1:Vgjpn7q8aQnye8nVJUboZbPd8DFLjYafgjJN2nO73xc=
-github.com/RichardKnop/logging v0.0.0-20181101035820-b1d5d44c82d6/go.mod h1:rJJ84PyA/Wlmw1hO+xTzV2wsSUon6J5ktg0g8BF2PuU=
 github.com/RichardKnop/uuid v0.0.0-20160216163710-c55201b03606 h1:HEadFvevCuszAyk2FHtjJiMhBDNp8eVC2P+8yAGt368=
 github.com/RichardKnop/uuid v0.0.0-20160216163710-c55201b03606/go.mod h1:a1zbGw9XTxfXn9AzJpparUXoLyawRZdcA//hyAtXLeU=
 github.com/XSAM/otelsql v0.42.0 h1:Li0xF4eJUxG2e0x3D4rvRlys1f27yJKvjTh7ljkUP5o=

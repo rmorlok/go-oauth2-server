@@ -56,7 +56,7 @@ func NewConfig(mustLoadOnce bool, keepReloading bool, backendType string) *Confi
 	case "consul":
 		backend = new(consulBackend)
 	default:
-		log.FATAL.Printf("%s is not a valid backend", backendType)
+		log.Error("invalid config backend", "backend", backendType)
 		os.Exit(1)
 	}
 
@@ -68,7 +68,7 @@ func NewConfig(mustLoadOnce bool, keepReloading bool, backendType string) *Confi
 		newCnf, err := backend.LoadConfig()
 
 		if err != nil {
-			log.FATAL.Print(err)
+			log.Error("initial config load failed", "err", err)
 			os.Exit(1)
 		}
 
@@ -77,7 +77,7 @@ func NewConfig(mustLoadOnce bool, keepReloading bool, backendType string) *Confi
 
 		// Set configLoaded to true
 		configLoaded = true
-		log.INFO.Print("Successfully loaded config for the first time")
+		log.Info("config loaded for the first time")
 	}
 
 	if keepReloading {
@@ -90,7 +90,7 @@ func NewConfig(mustLoadOnce bool, keepReloading bool, backendType string) *Confi
 				// Attempt to reload the config
 				newCnf, err := backend.LoadConfig()
 				if err != nil {
-					log.ERROR.Print(err)
+					log.Error("config reload failed", "err", err)
 					continue
 				}
 
@@ -99,7 +99,7 @@ func NewConfig(mustLoadOnce bool, keepReloading bool, backendType string) *Confi
 
 				// Set configLoaded to true
 				configLoaded = true
-				log.INFO.Print("Successfully reloaded config")
+				log.Info("config reloaded")
 			}
 		}()
 	}

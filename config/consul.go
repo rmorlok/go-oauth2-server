@@ -74,7 +74,7 @@ func (b *consulBackend) RefreshConfig(newCnf *Config) {
 
 func newConsulClient(theEndpoint, certFile, keyFile, caFile string) (*api.Client, error) {
 	// Log the consul endpoint for debugging purposes
-	log.INFO.Printf("CONSUL Endpoint: %s", theEndpoint)
+	log.Info("consul config backend", "endpoint", theEndpoint)
 
 	consulConfig := api.DefaultConfig()
 

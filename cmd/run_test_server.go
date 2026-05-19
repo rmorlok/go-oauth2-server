@@ -26,6 +26,12 @@ import (
 func RunTestServer(dbPath string, port int) error {
 	cnf := testmode.NewConfig(dbPath)
 
+	log.Init(log.Options{
+		Level:         cnf.Logging.Level,
+		Format:        log.Format(cnf.Logging.Format),
+		IsDevelopment: cnf.IsDevelopment,
+	})
+
 	db, err := database.NewDatabase(cnf)
 	if err != nil {
 		return fmt.Errorf("opening sqlite database at %q: %w", dbPath, err)
@@ -48,7 +54,7 @@ func RunTestServer(dbPath string, port int) error {
 	}
 	defer func() {
 		if err := providers.Shutdown(context.Background()); err != nil {
-			log.ERROR.Printf("telemetry shutdown: %v", err)
+			log.Error("telemetry shutdown failed", "err", err)
 		}
 	}()
 
@@ -75,7 +81,7 @@ func RunTestServer(dbPath string, port int) error {
 		return fmt.Errorf("test-mode: cannot bind %s: %w (try --test-port=<n>)", addr, err)
 	}
 
-	log.INFO.Printf("test-mode: listening on %s (sqlite=%s)", addr, dbPath)
+	log.Info("test-mode: listening", "addr", addr, "sqlite", dbPath)
 
 	srv := &graceful.Server{
 		Timeout: 5 * time.Second,

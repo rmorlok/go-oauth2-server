@@ -317,4 +317,3 @@ func metricSeen(rm metricdata.ResourceMetrics, name string) bool {
 	}
 	return false
 }
-

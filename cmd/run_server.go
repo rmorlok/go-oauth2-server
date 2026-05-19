@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"time"
 
+	"github.com/RichardKnop/go-oauth2-server/log"
 	"github.com/RichardKnop/go-oauth2-server/services"
+	"github.com/RichardKnop/go-oauth2-server/telemetry"
 	"github.com/gorilla/mux"
 	"github.com/phyber/negroni-gzip/gzip"
 	"github.com/urfave/negroni"
@@ -18,6 +21,16 @@ func RunServer(configBackend string) error {
 		return err
 	}
 	defer db.Close()
+
+	providers, err := telemetry.Init(context.Background(), cnf.Telemetry)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := providers.Shutdown(context.Background()); err != nil {
+			log.ERROR.Printf("telemetry shutdown: %v", err)
+		}
+	}()
 
 	// start the services
 	if err := services.Init(cnf, db); err != nil {

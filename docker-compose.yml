@@ -66,6 +66,37 @@ services:
       - postgres
     command: ["loaddata", "oauth/fixtures/test_clients.yml"]
 
+  # Local observability stack — opt-in via the "observability" profile.
+  #
+  # Brings up grafana/otel-lgtm, an all-in-one image bundling Grafana,
+  # Tempo (traces), Loki (logs), Prometheus (metrics) and an OTel
+  # Collector. The Collector listens on 4317 (gRPC) and 4318 (HTTP),
+  # both exposed on the host so a local `go run` of the app can target
+  # them without going through Docker networking.
+  #
+  # Activate with:
+  #
+  #   docker compose --profile observability up -d otel_lgtm
+  #
+  # Default `docker compose up -d` leaves this off.
+  #
+  # Grafana is published on host port 3001 (mapped to in-container 3000)
+  # to avoid collisions with anything else the contributor may have on
+  # 3000. Tempo / Loki / Prometheus data sources are auto-provisioned by
+  # the image. We mount one custom dashboard ("go-oauth2-server overview")
+  # that shows HTTP RED metrics, OAuth token issuance, and Tempo trace
+  # search wired to this service.
+  otel_lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: go_oauth2_server_otel_lgtm
+    profiles: ["observability"]
+    ports:
+      - "3001:3000"   # Grafana UI -> http://localhost:3001 (admin/admin)
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP/protobuf
+    volumes:
+      - "./deploy/observability/grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards:ro"
+
 volumes:
   etcd-data:
   db-data:

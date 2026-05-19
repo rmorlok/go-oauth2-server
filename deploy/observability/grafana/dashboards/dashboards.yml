@@ -1,0 +1,19 @@
+apiVersion: 1
+
+# Grafana dashboard provisioning for the local observability stack.
+#
+# The grafana/otel-lgtm image scans this directory for both .yml provider
+# configs and the JSON dashboards they reference. Mount the parent dir
+# (deploy/observability/grafana/dashboards) into the container at
+# /otel-lgtm/grafana/conf/provisioning/dashboards via docker-compose.
+providers:
+  - name: "go-oauth2-server"
+    orgId: 1
+    folder: "go-oauth2-server"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /otel-lgtm/grafana/conf/provisioning/dashboards
+      foldersFromFilesStructure: false

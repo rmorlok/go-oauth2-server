@@ -745,6 +745,55 @@ During `docker-compose up` process all configuration and fixtures will be loaded
 curl --compressed -v localhost:8080/v1/health
 ```
 
+### Local observability stack (optional)
+
+`docker-compose.yml` ships an opt-in `observability` profile that brings up
+[`grafana/otel-lgtm`](https://github.com/grafana/docker-otel-lgtm) — a
+single container bundling Grafana, Tempo (traces), Loki (logs),
+Prometheus (metrics), and a pre-wired OpenTelemetry Collector.
+
+```sh
+docker compose --profile observability up -d otel_lgtm
+```
+
+- Grafana UI: <http://localhost:3001> (login `admin` / `admin`).
+- OTLP gRPC: `localhost:4317`
+- OTLP HTTP: `localhost:4318`
+
+Default `docker compose up -d` is unchanged — the observability stack
+only runs when you pass `--profile observability`.
+
+To point the app at the local Collector, enable telemetry in the config
+(via env vars on a `go run` or in your etcd/consul payload):
+
+```sh
+OTEL_SERVICE_NAME=go-oauth2-server \
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
+  go run . runserver --test-mode
+```
+
+If you're loading config from etcd/consul, the equivalent JSON block is:
+
+```json
+{
+  "Telemetry": {
+    "Enabled": true,
+    "Exporter": {
+      "Protocol": "grpc",
+      "Endpoint": "http://localhost:4317",
+      "Insecure": true
+    },
+    "Resource": { "ServiceName": "go-oauth2-server" }
+  }
+}
+```
+
+A pre-provisioned **go-oauth2-server overview** dashboard is included
+under the `go-oauth2-server` folder in Grafana. It surfaces HTTP request
+rate / latency / errors by route, OAuth token issuance by grant type and
+outcome, recent OAuth traces from Tempo, and application logs from Loki.
+
 ## Supporting the project
 
 Donate BTC to my wallet if you find this project useful: `12iFVjQ5n3Qdmiai4Mp9EG93NSvDipyRKV`

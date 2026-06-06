@@ -42,6 +42,8 @@ behavior toggles.
 - [Resource server](#resource-server)
   - [`ANY /test/resource/{path}`](#any-testresourcepath)
   - [`POST /test/resource-policy`](#post-testresource-policy)
+  - [`ANY /test/api-key-resource/{path}`](#any-testapi-key-resourcepath)
+  - [`POST /test/api-key-resource-policy`](#post-testapi-key-resource-policy)
 - [Request inspection](#request-inspection)
   - [`GET /test/requests`](#get-testrequests)
 - [Sanitization](#sanitization)
@@ -95,6 +97,8 @@ see [Sample resource](#sample-resource).
 | `POST` | `/test/refresh-tokens/rotate-policy` | Toggle refresh-token rotation |
 | `ANY` | `/test/resource/{path}` | Sample protected resource (bearer-required) |
 | `POST` | `/test/resource-policy` | Register scope policy for a resource path |
+| `ANY` | `/test/api-key-resource/{path}` | Sample API-key protected resource |
+| `POST` | `/test/api-key-resource-policy` | Register API-key policy for a resource path |
 | `GET` | `/test/requests` | Inspect recorded requests to recordable endpoints |
 
 All request and response bodies are JSON unless noted. Errors return
@@ -590,6 +594,74 @@ the token.
 **Errors**
 
 - `400` — missing or malformed path.
+
+### `ANY /test/api-key-resource/{path}`
+
+A sample API-key protected resource. Test-mode only. This is useful for
+exercising static API-key connectors without introducing a second
+upstream service.
+
+**Headers**
+
+- `Authorization: Bearer <key>` — default placement.
+- A custom header may be configured with
+  [`POST /test/api-key-resource-policy`](#post-testapi-key-resource-policy).
+
+**Behavior**
+
+If no policy has been registered for the exact path, the handler
+accepts `Authorization: Bearer demo-api-key`. A successful request
+returns:
+
+```json
+{
+  "path": "<request path>",
+  "auth": "api-key",
+  "placement": "bearer",
+  "headerName": ""
+}
+```
+
+**Errors**
+
+- `401 invalid_token` — missing or wrong API key.
+
+### `POST /test/api-key-resource-policy`
+
+Register the API key accepted for an API-key resource path. Test-mode
+only.
+
+**Request body**
+
+```json
+{
+  "path": "/test/api-key-resource/demo",
+  "key": "demo-api-key",
+  "placement": "bearer"
+}
+```
+
+Header placement:
+
+```json
+{
+  "path": "/test/api-key-resource/demo",
+  "key": "demo-api-key",
+  "placement": "header",
+  "header_name": "X-Demo-Api-Key",
+  "prefix": "Token "
+}
+```
+
+**Response**
+
+`204 No Content`.
+
+**Errors**
+
+- `400` — malformed JSON; missing `path` or `key`; unsupported
+  placement; header placement without `header_name`; path does not
+  start with `/test/api-key-resource/`.
 
 ## Request inspection
 

@@ -13,6 +13,7 @@ func (s *Service) RegisterRoutes(router *mux.Router, prefix string) {
 	// /resource/* is a catch-all that matches any HTTP method, so it can't
 	// fit through routes.AddRoutes (which is method-specific).
 	subRouter.PathPrefix("/resource/").HandlerFunc(s.resourceHandler)
+	subRouter.PathPrefix("/api-key-resource/").HandlerFunc(s.apiKeyResourceHandler)
 }
 
 // GetRoutes returns the routes exposed by the test-mode control plane.
@@ -83,6 +84,12 @@ func (s *Service) GetRoutes() []routes.Route {
 			Method:      "POST",
 			Pattern:     "/resource-policy",
 			HandlerFunc: s.resourcePolicyHandler,
+		},
+		{
+			Name:        "test_api_key_resource_policy",
+			Method:      "POST",
+			Pattern:     "/api-key-resource-policy",
+			HandlerFunc: s.apiKeyResourcePolicyHandler,
 		},
 		{
 			Name:        "test_user_identity",

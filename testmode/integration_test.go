@@ -1373,6 +1373,74 @@ func TestResourceServer(t *testing.T) {
 	})
 }
 
+func TestAPIKeySampleResource(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	getResource := func(t *testing.T, path string, headers map[string]string) (int, []byte) {
+		t.Helper()
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("get api-key resource: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, body
+	}
+
+	t.Run("default bearer key returns 200 body", func(t *testing.T) {
+		status, body := getResource(t, "/test/api-key-resource/demo", map[string]string{
+			"Authorization": "Bearer demo-api-key",
+		})
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", status, body)
+		}
+		var doc map[string]any
+		json.Unmarshal(body, &doc)
+		if doc["path"] != "/test/api-key-resource/demo" || doc["auth"] != "api-key" {
+			t.Fatalf("unexpected api-key resource body: %v", doc)
+		}
+	})
+
+	t.Run("bad bearer key returns 401", func(t *testing.T) {
+		status, body := getResource(t, "/test/api-key-resource/demo", map[string]string{
+			"Authorization": "Bearer wrong-key",
+		})
+		if status != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("configured header placement returns 200", func(t *testing.T) {
+		buf, _ := json.Marshal(map[string]string{
+			"path":        "/test/api-key-resource/header-demo",
+			"key":         "header-demo-key",
+			"placement":   "header",
+			"header_name": "X-Demo-Api-Key",
+			"prefix":      "Token ",
+		})
+		resp, err := http.Post(srv.URL+"/test/api-key-resource-policy", "application/json", bytes.NewReader(buf))
+		if err != nil {
+			t.Fatalf("post api-key policy: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("expected policy 204, got %d", resp.StatusCode)
+		}
+
+		status, body := getResource(t, "/test/api-key-resource/header-demo", map[string]string{
+			"X-Demo-Api-Key": "Token header-demo-key",
+		})
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", status, body)
+		}
+	})
+}
+
 func TestPKCE(t *testing.T) {
 	app := newTestApp(t, true)
 	srv := app.server

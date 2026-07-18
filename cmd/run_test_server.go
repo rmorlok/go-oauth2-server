@@ -23,8 +23,12 @@ import (
 // The handler assembly itself lives in testmode.BuildTestApp so the same
 // middleware chain is used by integration tests, ensuring the binary and
 // the test harness can't drift.
-func RunTestServer(dbPath string, port int) error {
-	cnf := testmode.NewConfig(dbPath)
+func RunTestServer(dbPath string, port int, opts ...testmode.ConfigOptions) error {
+	var configOpts testmode.ConfigOptions
+	if len(opts) > 0 {
+		configOpts = opts[0]
+	}
+	cnf := testmode.NewConfigWithOptions(dbPath, configOpts)
 
 	db, err := database.NewDatabase(cnf)
 	if err != nil {
@@ -57,7 +61,7 @@ func RunTestServer(dbPath string, port int) error {
 		Format:        log.Format(cnf.Logging.Format),
 		IsDevelopment: cnf.IsDevelopment,
 	}
-	if cnf.Telemetry.Enabled && cnf.Telemetry.Signals.Logs != nil && *cnf.Telemetry.Signals.Logs {
+	if cnf.Telemetry.Enabled && (cnf.Telemetry.Signals.Logs == nil || *cnf.Telemetry.Signals.Logs) {
 		logOpts.OTelProvider = providers.LoggerProvider
 	}
 	log.Init(logOpts)

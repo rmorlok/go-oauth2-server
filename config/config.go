@@ -28,6 +28,15 @@ type OauthConfig struct {
 	// inspection. Default off in production; the test-mode config sets it
 	// to true so harnesses can exercise rotation by default.
 	RefreshTokenRotation bool
+
+	// SyntheticRefreshTokenPrefix enables test-mode-only refresh-token
+	// exchanges for tokens that start with this prefix. Production configs
+	// leave TestMode false, so this field is ignored there.
+	SyntheticRefreshTokenPrefix string
+
+	// SyntheticRefreshScope is used when a synthetic refresh-token exchange
+	// does not request a narrower scope.
+	SyntheticRefreshScope string
 }
 
 // SessionConfig stores session configuration for the web app
@@ -65,4 +74,5 @@ type Config struct {
 	Telemetry     telemetry.Config
 	Logging       LoggingConfig
 	IsDevelopment bool
+	TestMode      bool
 }

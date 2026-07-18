@@ -31,6 +31,7 @@ func newTestApp(t *testing.T, withTestMode bool) *testApp {
 	t.Helper()
 
 	cnf := testmode.NewConfig(":memory:")
+	cnf.TestMode = withTestMode
 	db, err := database.NewDatabase(cnf)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -984,6 +985,112 @@ func TestRefreshTokenRotation(t *testing.T) {
 	})
 }
 
+func TestSyntheticRefreshTokens(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	mustPostJSON(t, srv.URL+"/test/clients", map[string]string{
+		"key":    "synth-client",
+		"secret": "synth-secret",
+		"scope":  "loadtest.read custom.read",
+	})
+
+	doRefresh := func(t *testing.T, refreshToken, scope string) (int, []byte) {
+		t.Helper()
+		form := url.Values{}
+		form.Set("grant_type", "refresh_token")
+		form.Set("refresh_token", refreshToken)
+		if scope != "" {
+			form.Set("scope", scope)
+		}
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("synth-client", "synth-secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("refresh: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, body
+	}
+
+	t.Run("rt-prefixed token refreshes without a provider token row", func(t *testing.T) {
+		status, body := doRefresh(t, "rt_cxn_lt_smoke_000000001", "")
+		if status != http.StatusOK {
+			t.Fatalf("synthetic refresh expected 200, got %d body=%s", status, body)
+		}
+		var tok struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			Scope        string `json:"scope"`
+			TokenType    string `json:"token_type"`
+		}
+		if err := json.Unmarshal(body, &tok); err != nil {
+			t.Fatalf("decode token: %v body=%s", err, body)
+		}
+		if !strings.HasPrefix(tok.AccessToken, "at_cxn_lt_smoke_000000001_") {
+			t.Fatalf("unexpected synthetic access token shape: %q", tok.AccessToken)
+		}
+		if tok.RefreshToken != "rt_cxn_lt_smoke_000000001" {
+			t.Fatalf("expected refresh token to be reused, got %q", tok.RefreshToken)
+		}
+		if tok.Scope != "loadtest.read" || tok.TokenType != "Bearer" {
+			t.Fatalf("unexpected synthetic token response: %+v", tok)
+		}
+	})
+
+	t.Run("requested scope can narrow the synthetic response", func(t *testing.T) {
+		status, body := doRefresh(t, "rt_cxn_lt_smoke_000000002", "custom.read")
+		if status != http.StatusOK {
+			t.Fatalf("synthetic refresh expected 200, got %d body=%s", status, body)
+		}
+		var tok struct {
+			Scope string `json:"scope"`
+		}
+		json.Unmarshal(body, &tok)
+		if tok.Scope != "custom.read" {
+			t.Fatalf("expected requested scope custom.read, got %q body=%s", tok.Scope, body)
+		}
+	})
+
+	t.Run("non-synthetic token still uses normal lookup", func(t *testing.T) {
+		status, body := doRefresh(t, "missing-provider-token", "")
+		if status == http.StatusOK {
+			t.Fatalf("missing non-synthetic refresh token should not succeed: %s", body)
+		}
+		if status != http.StatusNotFound {
+			t.Fatalf("expected normal missing-token 404, got %d body=%s", status, body)
+		}
+	})
+}
+
+func TestSyntheticRefreshTokensProductionExcluded(t *testing.T) {
+	app := newTestApp(t, false)
+	if _, err := app.oauth.CreateClient("prod-synth", "prod-synth-secret", "", "", false); err != nil {
+		t.Fatalf("CreateClient: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", "rt_cxn_lt_prod_000000001")
+	req, _ := http.NewRequest("POST", app.server.URL+"/v1/oauth/tokens", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth("prod-synth", "prod-synth-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatalf("synthetic refresh must be disabled outside test mode: %s", body)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected production-style missing-token 404, got %d body=%s", resp.StatusCode, body)
+	}
+}
+
 func TestTokenRevocation(t *testing.T) {
 	app := newTestApp(t, true)
 	srv := app.server
@@ -1371,6 +1478,83 @@ func TestResourceServer(t *testing.T) {
 			t.Fatalf("/test/resource-policy should not be recorded as resource: %v", entries)
 		}
 	})
+}
+
+func TestLoadResourceSink(t *testing.T) {
+	app := newTestApp(t, true)
+	srv := app.server
+
+	doRequest := func(t *testing.T, target, bearer string) (int, http.Header, []byte) {
+		t.Helper()
+		req, _ := http.NewRequest("POST", srv.URL+target, nil)
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("load resource: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, resp.Header, body
+	}
+
+	t.Run("status and response size are configurable and not recorded", func(t *testing.T) {
+		app.recorder.Reset()
+		status, hdr, body := doRequest(t, "/test/load/resource/fast?status=202&bytes=17", "")
+		if status != http.StatusAccepted {
+			t.Fatalf("expected 202, got %d body=%s", status, body)
+		}
+		if len(body) != 17 {
+			t.Fatalf("expected 17 response bytes, got %d", len(body))
+		}
+		if got := hdr.Get("X-Test-Load-Path"); got != "/test/load/resource/fast" {
+			t.Fatalf("unexpected load path header: %q", got)
+		}
+		if got := hdr.Get("X-Test-Load-Response-Bytes"); got != "17" {
+			t.Fatalf("unexpected response byte header: %q", got)
+		}
+		for _, entry := range app.recorder.Snapshot(testmode.SnapshotFilter{}) {
+			if strings.HasPrefix(entry.Path, "/test/load/resource") {
+				t.Fatalf("load sink should not be recorded: %+v", entry)
+			}
+		}
+	})
+
+	t.Run("bearer prefix is optional but enforced when configured", func(t *testing.T) {
+		status, _, body := doRequest(t, "/test/load/resource/protected?bearer_prefix=at_", "")
+		if status != http.StatusUnauthorized {
+			t.Fatalf("expected missing bearer 401, got %d body=%s", status, body)
+		}
+		status, _, body = doRequest(t, "/test/load/resource/protected?bearer_prefix=at_", "wrong_cxn")
+		if status != http.StatusUnauthorized {
+			t.Fatalf("expected bad bearer 401, got %d body=%s", status, body)
+		}
+		status, _, body = doRequest(t, "/test/load/resource/protected?bearer_prefix=at_", "at_cxn_ok")
+		if status != http.StatusOK {
+			t.Fatalf("expected matching bearer 200, got %d body=%s", status, body)
+		}
+	})
+
+	t.Run("bad controls fail with 400", func(t *testing.T) {
+		status, _, body := doRequest(t, "/test/load/resource/bad?status=700", "")
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected bad status 400, got %d body=%s", status, body)
+		}
+		status, _, body = doRequest(t, "/test/load/resource/bad?bytes=16777217", "")
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected oversized bytes 400, got %d body=%s", status, body)
+		}
+	})
+}
+
+func TestLoadResourceSinkProductionExcluded(t *testing.T) {
+	app := newTestApp(t, false)
+	resp := mustGet(t, app.server.URL+"/test/load/resource/demo")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected load sink to be test-mode-only, got %d", resp.StatusCode)
+	}
 }
 
 func TestAPIKeySampleResource(t *testing.T) {

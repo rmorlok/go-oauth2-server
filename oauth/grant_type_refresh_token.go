@@ -2,6 +2,8 @@ package oauth
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/RichardKnop/go-oauth2-server/models"
@@ -21,6 +23,11 @@ func (s *Service) refreshTokenGrant(r *http.Request, client *models.OauthClient)
 			s.telem.SetScope(span, resp.Scope)
 		}
 	}()
+
+	if syntheticResp, ok := s.syntheticRefreshTokenGrant(r); ok {
+		return syntheticResp, nil
+	}
+
 	// Fetch the refresh token
 	theRefreshToken, err := s.GetValidRefreshToken(r.Form.Get("refresh_token"), client)
 	if err != nil {
@@ -63,4 +70,36 @@ func (s *Service) refreshTokenGrant(r *http.Request, client *models.OauthClient)
 	}
 
 	return accessTokenResponse, nil
+}
+
+func (s *Service) syntheticRefreshTokenGrant(r *http.Request) (*AccessTokenResponse, bool) {
+	if !s.cnf.TestMode || s.cnf.Oauth.SyntheticRefreshTokenPrefix == "" {
+		return nil, false
+	}
+
+	refreshToken := r.Form.Get("refresh_token")
+	if !strings.HasPrefix(refreshToken, s.cnf.Oauth.SyntheticRefreshTokenPrefix) {
+		return nil, false
+	}
+
+	scope := strings.TrimSpace(r.Form.Get("scope"))
+	if scope == "" {
+		scope = s.cnf.Oauth.SyntheticRefreshScope
+	}
+	if scope == "" {
+		scope = s.GetDefaultScope()
+	}
+
+	tokenSubject := strings.TrimPrefix(refreshToken, s.cnf.Oauth.SyntheticRefreshTokenPrefix)
+	if tokenSubject == "" {
+		tokenSubject = "synthetic"
+	}
+
+	return &AccessTokenResponse{
+		AccessToken:  "at_" + tokenSubject + "_" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36),
+		ExpiresIn:    s.cnf.Oauth.AccessTokenLifetime,
+		TokenType:    tokentypes.Bearer,
+		Scope:        scope,
+		RefreshToken: refreshToken,
+	}, true
 }

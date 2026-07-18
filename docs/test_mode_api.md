@@ -39,11 +39,13 @@ behavior toggles.
   - [`POST /test/revoke`](#post-testrevoke)
 - [Refresh-token rotation policy](#refresh-token-rotation-policy)
   - [`POST /test/refresh-tokens/rotate-policy`](#post-testrefresh-tokensrotate-policy)
+  - [Synthetic load-test refresh tokens](#synthetic-load-test-refresh-tokens)
 - [Resource server](#resource-server)
   - [`ANY /test/resource/{path}`](#any-testresourcepath)
   - [`POST /test/resource-policy`](#post-testresource-policy)
   - [`ANY /test/api-key-resource/{path}`](#any-testapi-key-resourcepath)
   - [`POST /test/api-key-resource-policy`](#post-testapi-key-resource-policy)
+  - [`ANY /test/load/resource/{path}`](#any-testloadresourcepath)
 - [Request inspection](#request-inspection)
   - [`GET /test/requests`](#get-testrequests)
 - [Sanitization](#sanitization)
@@ -56,7 +58,9 @@ Test mode is a flag on the existing `runserver` command:
 ```sh
 go-oauth2-server runserver --test-mode \
   [--test-port 8080] \
-  [--test-db-path :memory:]
+  [--test-db-path :memory:] \
+  [--test-telemetry] \
+  [--test-otel-endpoint http://otel-collector:4317]
 ```
 
 When `--test-mode` is on:
@@ -71,8 +75,17 @@ When `--test-mode` is on:
   `--test-mode` is off.
 - Refresh-token rotation defaults to **on**. Toggle at runtime via
   [`POST /test/refresh-tokens/rotate-policy`](#post-testrefresh-tokensrotate-policy).
+- Synthetic refresh tokens with the `rt_` prefix are accepted by the
+  refresh-token grant without preloading provider-side refresh-token rows.
 - The `profile` and `email` scopes are seeded alongside the production
   defaults (`read`, `read_write`).
+- Telemetry remains default-off. Enable it for Kubernetes load-test
+  runs with `--test-telemetry` or
+  `GO_OAUTH2_TEST_TELEMETRY_ENABLED=true`. The test-mode flags
+  `--test-otel-endpoint`, `--test-otel-protocol`,
+  `--test-otel-service-name`, and `--test-otel-insecure` override the
+  corresponding OTLP settings; standard `OTEL_*` environment variables
+  still fill any unset values.
 
 The standard `/v1/oauth/*` and `/web/*` endpoints continue to work
 exactly as in production. `/test/resource/{path}` is *also* mounted
@@ -99,6 +112,7 @@ see [Sample resource](#sample-resource).
 | `POST` | `/test/resource-policy` | Register scope policy for a resource path |
 | `ANY` | `/test/api-key-resource/{path}` | Sample API-key protected resource |
 | `POST` | `/test/api-key-resource-policy` | Register API-key policy for a resource path |
+| `ANY` | `/test/load/resource/{path}` | Non-recorded fast sink for load tests |
 | `GET` | `/test/requests` | Inspect recorded requests to recordable endpoints |
 
 All request and response bodies are JSON unless noted. Errors return
@@ -449,8 +463,8 @@ A request is classified by path (and form fields for `/v1/oauth/tokens`):
 | `resource` | `ANY /test/resource/<path>` | strict prefix `/test/resource/` |
 
 Other paths (including `/test/*` control-plane endpoints other than
-`/test/resource/*`) are not classified, so they are never recorded
-or scriptable.
+`/test/resource/*`, and the fast sink at `/test/load/resource/*`) are
+not classified, so they are never recorded or scriptable.
 
 ## Provider-side revocation
 
@@ -530,6 +544,33 @@ When rotation is on, every `grant_type=refresh_token` exchange:
 
 Replaying the old RT after rotation fails with HTTP 400 and the body
 `{"error":"Refresh token revoked"}`.
+
+### Synthetic load-test refresh tokens
+
+When `--test-mode` is enabled, `grant_type=refresh_token` accepts
+refresh tokens that start with `rt_` without first creating
+provider-side token rows. This is intended for AuthProxy load tests
+that seed millions of proxy-side credentials such as
+`rt_<connection_id>` and then exercise refresh sweeps against a
+scalable provider.
+
+Synthetic refresh still requires normal OAuth client authentication.
+Only the refresh-token lookup is bypassed. The response includes:
+
+- a generated access token shaped as `at_<connection_id>_<suffix>`;
+- `refresh_token` set to the original synthetic refresh token;
+- `scope` set to the requested `scope`, or `loadtest.read` when no
+  narrower scope is requested.
+
+Example:
+
+```sh
+curl -s -u acme:s3cret http://127.0.0.1:8080/v1/oauth/tokens \
+  -d 'grant_type=refresh_token&refresh_token=rt_cxn_000001'
+```
+
+This behavior is gated by test-mode config and is not available in
+production `runserver`.
 
 ## Resource server
 
@@ -663,6 +704,50 @@ Header placement:
   placement; header placement without `header_name`; path does not
   start with `/test/api-key-resource/`.
 
+### `ANY /test/load/resource/{path}`
+
+A non-recorded fast sink for proxy-QPS load tests. Test-mode only.
+It bypasses the script queue and request recorder so the provider can
+absorb high request rates without DB writes on every resource call.
+
+**Query parameters**
+
+- `status` — HTTP status to return. Defaults to `200`; must be
+  `100` through `599`.
+- `delay` — fixed delay as a Go duration such as `25ms` or `1s`.
+- `delay_ms` — fixed delay in milliseconds. Ignored when `delay` is set.
+- `jitter` — random additional delay from `0` through the supplied Go
+  duration.
+- `jitter_ms` — random additional delay in milliseconds. Ignored when
+  `jitter` is set.
+- `bytes` — response body size in bytes. Defaults to `0`; capped at
+  16 MiB.
+- `response_size` — alias for `bytes`.
+- `bearer_prefix` — optional access-token prefix validation. When set,
+  the request must include `Authorization: Bearer <token>` and the
+  token must start with this prefix.
+
+Successful responses include `X-Test-Load-Path` and
+`X-Test-Load-Response-Bytes` headers. Bodies are `application/octet-stream`
+when `bytes` is greater than zero.
+
+Example:
+
+```sh
+curl -v 'http://127.0.0.1:8080/test/load/resource/foo?status=202&bytes=1024&delay_ms=10'
+```
+
+Bearer-prefix validation:
+
+```sh
+curl -v \
+  -H 'Authorization: Bearer at_cxn_000001' \
+  'http://127.0.0.1:8080/test/load/resource/foo?bearer_prefix=at_'
+```
+
+The endpoint is still covered by HTTP telemetry when telemetry is
+enabled; it is just not recorder/script-queue traffic.
+
 ## Request inspection
 
 ### `GET /test/requests`
@@ -725,9 +810,11 @@ they cannot be disabled in test mode.
 | Config backend | etcd or consul | in-memory defaults |
 | Database | postgres | embedded SQLite (`:memory:` by default) |
 | Refresh-token rotation | off (legacy reuse) | on by default; toggleable via [`/test/refresh-tokens/rotate-policy`](#post-testrefresh-tokensrotate-policy) |
+| Synthetic `rt_` refresh tokens | not available | available for load tests after normal client auth |
 | Default scopes | `read`, `read_write` | `read`, `read_write`, `profile`, `email` |
 | `/test/*` control plane | not mounted | mounted |
 | `/test/resource/{path}` | **mounted** (sample resource) | mounted (with policy + recorder + scriptable) |
+| `/test/load/resource/{path}` | not mounted | mounted as non-recorded fast sink |
 | Request recorder | not active | active for recordable endpoints |
 | Script queue | not active | active for recordable endpoints |
 | gzip middleware | enabled | disabled (would break script queue's pass-through actions) |

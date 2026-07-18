@@ -455,6 +455,8 @@ go-oauth2-server runserver --test-mode
 
 This boots the server with no etcd / consul dependency, an embedded SQLite database, and a `/test/*` control plane that lets test harnesses register clients and users, drive the authorize step programmatically, script arbitrary token / refresh / revoke / resource responses, inspect requests with secret-redacted snapshots, and simulate identity changes mid-session.
 
+For AuthProxy-style load tests, test mode also exposes a non-recorded fast sink at `/test/load/resource/{path}` and accepts synthetic refresh tokens shaped as `rt_<connection_id>` on the refresh-token grant. Enable provider metrics during Kubernetes runs with `--test-telemetry --test-otel-endpoint <collector:4317>` or the matching `GO_OAUTH2_TEST_*` environment variables.
+
 Quick start:
 
 ```sh
@@ -716,7 +718,9 @@ The `runserver` command also accepts test-mode flags. When `--test-mode` is set,
 ```sh
 go-oauth2-server runserver --test-mode \
   [--test-port 8080] \
-  [--test-db-path :memory:]
+  [--test-db-path :memory:] \
+  [--test-telemetry] \
+  [--test-otel-endpoint http://otel-collector:4317]
 ```
 
 ## Testing

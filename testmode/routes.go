@@ -14,6 +14,8 @@ func (s *Service) RegisterRoutes(router *mux.Router, prefix string) {
 	// fit through routes.AddRoutes (which is method-specific).
 	subRouter.PathPrefix("/resource/").HandlerFunc(s.resourceHandler)
 	subRouter.PathPrefix("/api-key-resource/").HandlerFunc(s.apiKeyResourceHandler)
+	subRouter.HandleFunc("/load/resource", s.loadResourceHandler)
+	subRouter.PathPrefix("/load/resource/").HandlerFunc(s.loadResourceHandler)
 }
 
 // GetRoutes returns the routes exposed by the test-mode control plane.

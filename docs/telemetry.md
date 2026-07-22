@@ -44,6 +44,20 @@ The full `telemetry:` block lives inside the application config (loaded
 from etcd, consul, or the in-process test-mode config). The schema is
 defined in `telemetry/config.go`.
 
+`runserver` can also overlay the most common fields from CLI flags or
+matching `GO_OAUTH2_*` environment variables:
+
+```sh
+go-oauth2-server runserver \
+  --telemetry \
+  --otel-endpoint http://otel-collector:4317 \
+  --otel-protocol grpc \
+  --otel-service-name go-oauth2-server \
+  --otel-insecure
+```
+
+These overrides apply to both regular and `--test-mode` servers.
+
 ```json
 {
   "Telemetry": {
@@ -101,9 +115,21 @@ Field-by-field:
 
 ## Environment variables
 
-The binary honors the standard `OTEL_*` environment variables. Precedence
-runs **config → env → defaults**: explicit config values win, env fills
-unset fields, defaults fill what env doesn't supply.
+The binary honors the `runserver`-specific `GO_OAUTH2_*` variables and
+the standard `OTEL_*` environment variables. Precedence runs
+**CLI / `GO_OAUTH2_*` → config → `OTEL_*` → defaults**: explicit
+runserver overrides win, loaded config wins over standard OTel env,
+standard OTel env fills unset fields, and defaults fill what remains.
+
+| Variable | Maps to |
+| --- | --- |
+| `GO_OAUTH2_TELEMETRY_ENABLED` | enable telemetry export |
+| `GO_OAUTH2_OTEL_ENDPOINT` | `Exporter.Endpoint` |
+| `GO_OAUTH2_OTEL_PROTOCOL` | `Exporter.Protocol` |
+| `GO_OAUTH2_OTEL_SERVICE_NAME` | `Resource.ServiceName` |
+| `GO_OAUTH2_OTEL_INSECURE` | `Exporter.Insecure` |
+
+Standard OTel environment variables:
 
 | Variable | Maps to |
 | --- | --- |

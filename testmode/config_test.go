@@ -3,6 +3,7 @@ package testmode
 import (
 	"testing"
 
+	"github.com/RichardKnop/go-oauth2-server/config"
 	"github.com/RichardKnop/go-oauth2-server/telemetry"
 )
 
@@ -23,12 +24,12 @@ func TestNewConfigDefaultsLoadMode(t *testing.T) {
 }
 
 func TestNewConfigWithTelemetryOptions(t *testing.T) {
-	cnf := NewConfigWithOptions(":memory:", ConfigOptions{
-		TelemetryEnabled:     true,
-		TelemetryEndpoint:    "otel-collector:4317",
-		TelemetryProtocol:    telemetry.ProtocolHTTP,
-		TelemetryServiceName: "go-oauth2-server-load",
-		TelemetryInsecure:    true,
+	cnf := NewConfigWithOptions(":memory:", config.TelemetryOptions{
+		Enabled:     true,
+		Endpoint:    "otel-collector:4317",
+		Protocol:    telemetry.ProtocolHTTP,
+		ServiceName: "go-oauth2-server-load",
+		Insecure:    true,
 	})
 
 	if !cnf.Telemetry.Enabled {

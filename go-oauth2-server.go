@@ -5,21 +5,21 @@ import (
 	"os"
 
 	"github.com/RichardKnop/go-oauth2-server/cmd"
-	"github.com/RichardKnop/go-oauth2-server/testmode"
+	"github.com/RichardKnop/go-oauth2-server/config"
 	"github.com/urfave/cli"
 )
 
 var (
-	cliApp              *cli.App
-	configBackend       string
-	testMode            bool
-	testDBPath          string
-	testPort            int
-	testTelemetry       bool
-	testOTELEndpoint    string
-	testOTELProtocol    string
-	testOTELServiceName string
-	testOTELInsecure    bool
+	cliApp           *cli.App
+	configBackend    string
+	testMode         bool
+	testDBPath       string
+	testPort         int
+	telemetryEnabled bool
+	otelEndpoint     string
+	otelProtocol     string
+	otelServiceName  string
+	otelInsecure     bool
 )
 
 func init() {
@@ -59,34 +59,34 @@ func main() {
 			Destination: &testPort,
 		},
 		cli.BoolFlag{
-			Name:        "test-telemetry",
-			Usage:       "enable OpenTelemetry export in test mode",
-			EnvVar:      "GO_OAUTH2_TEST_TELEMETRY_ENABLED",
-			Destination: &testTelemetry,
+			Name:        "telemetry, test-telemetry",
+			Usage:       "enable OpenTelemetry export",
+			EnvVar:      "GO_OAUTH2_TELEMETRY_ENABLED,GO_OAUTH2_TEST_TELEMETRY_ENABLED",
+			Destination: &telemetryEnabled,
 		},
 		cli.StringFlag{
-			Name:        "test-otel-endpoint",
-			Usage:       "OTLP endpoint for test-mode telemetry; standard OTEL_EXPORTER_OTLP_ENDPOINT also applies",
-			EnvVar:      "GO_OAUTH2_TEST_OTEL_ENDPOINT",
-			Destination: &testOTELEndpoint,
+			Name:        "otel-endpoint, test-otel-endpoint",
+			Usage:       "OTLP endpoint; standard OTEL_EXPORTER_OTLP_ENDPOINT also applies",
+			EnvVar:      "GO_OAUTH2_OTEL_ENDPOINT,GO_OAUTH2_TEST_OTEL_ENDPOINT",
+			Destination: &otelEndpoint,
 		},
 		cli.StringFlag{
-			Name:        "test-otel-protocol",
-			Usage:       "OTLP protocol for test-mode telemetry: grpc or http/protobuf",
-			EnvVar:      "GO_OAUTH2_TEST_OTEL_PROTOCOL",
-			Destination: &testOTELProtocol,
+			Name:        "otel-protocol, test-otel-protocol",
+			Usage:       "OTLP protocol: grpc or http/protobuf",
+			EnvVar:      "GO_OAUTH2_OTEL_PROTOCOL,GO_OAUTH2_TEST_OTEL_PROTOCOL",
+			Destination: &otelProtocol,
 		},
 		cli.StringFlag{
-			Name:        "test-otel-service-name",
-			Usage:       "service.name resource attribute for test-mode telemetry",
-			EnvVar:      "GO_OAUTH2_TEST_OTEL_SERVICE_NAME",
-			Destination: &testOTELServiceName,
+			Name:        "otel-service-name, test-otel-service-name",
+			Usage:       "service.name resource attribute for telemetry",
+			EnvVar:      "GO_OAUTH2_OTEL_SERVICE_NAME,GO_OAUTH2_TEST_OTEL_SERVICE_NAME",
+			Destination: &otelServiceName,
 		},
 		cli.BoolFlag{
-			Name:        "test-otel-insecure",
-			Usage:       "use insecure OTLP transport in test mode",
-			EnvVar:      "GO_OAUTH2_TEST_OTEL_INSECURE",
-			Destination: &testOTELInsecure,
+			Name:        "otel-insecure, test-otel-insecure",
+			Usage:       "use insecure OTLP transport",
+			EnvVar:      "GO_OAUTH2_OTEL_INSECURE,GO_OAUTH2_TEST_OTEL_INSECURE",
+			Destination: &otelInsecure,
 		},
 	}
 
@@ -112,9 +112,9 @@ func main() {
 			Flags: runserverFlags,
 			Action: func(c *cli.Context) error {
 				if testMode {
-					return cmd.RunTestServer(testDBPath, testPort, testmodeConfigOptions())
+					return cmd.RunTestServer(testDBPath, testPort, telemetryOptions())
 				}
-				return cmd.RunServer(configBackend)
+				return cmd.RunServer(configBackend, telemetryOptions())
 			},
 		},
 	}
@@ -125,12 +125,12 @@ func main() {
 	}
 }
 
-func testmodeConfigOptions() testmode.ConfigOptions {
-	return testmode.ConfigOptions{
-		TelemetryEnabled:     testTelemetry,
-		TelemetryEndpoint:    testOTELEndpoint,
-		TelemetryProtocol:    testOTELProtocol,
-		TelemetryServiceName: testOTELServiceName,
-		TelemetryInsecure:    testOTELInsecure,
+func telemetryOptions() config.TelemetryOptions {
+	return config.TelemetryOptions{
+		Enabled:     telemetryEnabled,
+		Endpoint:    otelEndpoint,
+		Protocol:    otelProtocol,
+		ServiceName: otelServiceName,
+		Insecure:    otelInsecure,
 	}
 }

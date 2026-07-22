@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/RichardKnop/go-oauth2-server/config"
 	"github.com/RichardKnop/go-oauth2-server/log"
 	"github.com/RichardKnop/go-oauth2-server/services"
 	"github.com/RichardKnop/go-oauth2-server/telemetry"
@@ -17,12 +18,15 @@ import (
 )
 
 // RunServer runs the app
-func RunServer(configBackend string) error {
+func RunServer(configBackend string, opts ...config.TelemetryOptions) error {
 	cnf, db, err := initConfigDB(true, true, configBackend)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	if len(opts) > 0 {
+		opts[0].ApplyTo(cnf)
+	}
 
 	providers, err := telemetry.Init(context.Background(), cnf.Telemetry)
 	if err != nil {
@@ -39,7 +43,7 @@ func RunServer(configBackend string) error {
 		Format:        log.Format(cnf.Logging.Format),
 		IsDevelopment: cnf.IsDevelopment,
 	}
-	if cnf.Telemetry.Enabled && cnf.Telemetry.Signals.Logs != nil && *cnf.Telemetry.Signals.Logs {
+	if cnf.Telemetry.Enabled && (cnf.Telemetry.Signals.Logs == nil || *cnf.Telemetry.Signals.Logs) {
 		logOpts.OTelProvider = providers.LoggerProvider
 	}
 	log.Init(logOpts)

@@ -59,8 +59,8 @@ Test mode is a flag on the existing `runserver` command:
 go-oauth2-server runserver --test-mode \
   [--test-port 8080] \
   [--test-db-path :memory:] \
-  [--test-telemetry] \
-  [--test-otel-endpoint http://otel-collector:4317]
+  [--telemetry] \
+  [--otel-endpoint http://otel-collector:4317]
 ```
 
 When `--test-mode` is on:
@@ -80,12 +80,11 @@ When `--test-mode` is on:
 - The `profile` and `email` scopes are seeded alongside the production
   defaults (`read`, `read_write`).
 - Telemetry remains default-off. Enable it for Kubernetes load-test
-  runs with `--test-telemetry` or
-  `GO_OAUTH2_TEST_TELEMETRY_ENABLED=true`. The test-mode flags
-  `--test-otel-endpoint`, `--test-otel-protocol`,
-  `--test-otel-service-name`, and `--test-otel-insecure` override the
-  corresponding OTLP settings; standard `OTEL_*` environment variables
-  still fill any unset values.
+  runs with `--telemetry` or `GO_OAUTH2_TELEMETRY_ENABLED=true`.
+  The flags `--otel-endpoint`, `--otel-protocol`,
+  `--otel-service-name`, and `--otel-insecure` override the
+  corresponding OTLP settings for both regular and test-mode servers;
+  standard `OTEL_*` environment variables still fill any unset values.
 
 The standard `/v1/oauth/*` and `/web/*` endpoints continue to work
 exactly as in production. `/test/resource/{path}` is *also* mounted
@@ -549,8 +548,8 @@ Replaying the old RT after rotation fails with HTTP 400 and the body
 
 When `--test-mode` is enabled, `grant_type=refresh_token` accepts
 refresh tokens that start with `rt_` without first creating
-provider-side token rows. This is intended for AuthProxy load tests
-that seed millions of proxy-side credentials such as
+provider-side token rows. This is intended for large proxy and
+integration load tests that seed many upstream credentials such as
 `rt_<connection_id>` and then exercise refresh sweeps against a
 scalable provider.
 

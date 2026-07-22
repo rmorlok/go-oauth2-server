@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/RichardKnop/go-oauth2-server/config"
 	"github.com/RichardKnop/go-oauth2-server/database"
 	"github.com/RichardKnop/go-oauth2-server/log"
 	"github.com/RichardKnop/go-oauth2-server/models"
@@ -23,8 +24,8 @@ import (
 // The handler assembly itself lives in testmode.BuildTestApp so the same
 // middleware chain is used by integration tests, ensuring the binary and
 // the test harness can't drift.
-func RunTestServer(dbPath string, port int, opts ...testmode.ConfigOptions) error {
-	var configOpts testmode.ConfigOptions
+func RunTestServer(dbPath string, port int, opts ...config.TelemetryOptions) error {
+	var configOpts config.TelemetryOptions
 	if len(opts) > 0 {
 		configOpts = opts[0]
 	}

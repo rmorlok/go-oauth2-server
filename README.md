@@ -455,7 +455,7 @@ go-oauth2-server runserver --test-mode
 
 This boots the server with no etcd / consul dependency, an embedded SQLite database, and a `/test/*` control plane that lets test harnesses register clients and users, drive the authorize step programmatically, script arbitrary token / refresh / revoke / resource responses, inspect requests with secret-redacted snapshots, and simulate identity changes mid-session.
 
-For AuthProxy-style load tests, test mode also exposes a non-recorded fast sink at `/test/load/resource/{path}` and accepts synthetic refresh tokens shaped as `rt_<connection_id>` on the refresh-token grant. Enable provider metrics during Kubernetes runs with `--test-telemetry --test-otel-endpoint <collector:4317>` or the matching `GO_OAUTH2_TEST_*` environment variables.
+For large load-test scenarios, test mode also exposes a non-recorded fast sink at `/test/load/resource/{path}` and accepts synthetic refresh tokens shaped as `rt_<connection_id>` on the refresh-token grant. Enable provider metrics during Kubernetes runs with `--telemetry --otel-endpoint <collector:4317>` or the matching `GO_OAUTH2_*` environment variables.
 
 Quick start:
 
@@ -496,9 +496,11 @@ flow through `log/slog`, optionally shipped to the same collector and
 stamped with `trace_id` / `span_id` for cross-signal correlation.
 
 Telemetry is **default-off** — deployments see zero behavioral change
-on upgrade until they opt in via the `Telemetry.Enabled` config flag
-(or `OTEL_*` env vars). A bundled `docker compose --profile observability`
-stack (Grafana + Tempo + Loki + Prometheus + Collector) gives
+on upgrade until they opt in via the `Telemetry.Enabled` config flag,
+`--telemetry`, or `GO_OAUTH2_TELEMETRY_ENABLED=true`. Standard
+`OTEL_*` env vars fill exporter/resource fields. A bundled
+`docker compose --profile observability` stack
+(Grafana + Tempo + Loki + Prometheus + Collector) gives
 contributors a one-command path to seeing all three signals locally.
 
 See [`docs/telemetry.md`](docs/telemetry.md) for the full configuration
@@ -719,8 +721,8 @@ The `runserver` command also accepts test-mode flags. When `--test-mode` is set,
 go-oauth2-server runserver --test-mode \
   [--test-port 8080] \
   [--test-db-path :memory:] \
-  [--test-telemetry] \
-  [--test-otel-endpoint http://otel-collector:4317]
+  [--telemetry] \
+  [--otel-endpoint http://otel-collector:4317]
 ```
 
 ## Testing

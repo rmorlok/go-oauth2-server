@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/RichardKnop/go-oauth2-server/models"
 	"github.com/RichardKnop/go-oauth2-server/session"
@@ -25,11 +26,19 @@ func (s *Service) authorizeForm(w http.ResponseWriter, r *http.Request) {
 	errMsg, _ := sessionService.GetFlashMessage()
 	query := r.URL.Query()
 	query.Set("login_redirect_uri", r.URL.Path)
-	renderTemplate(w, "authorize.html", map[string]interface{}{
-		"error":       errMsg,
-		"clientID":    client.Key,
-		"queryString": getQueryString(query),
-		"token":       responseType == "token",
+	clientInitial := "A"
+	for _, character := range client.Key {
+		clientInitial = strings.ToUpper(string(character))
+		break
+	}
+	renderPage(w, r, "authorize.html", map[string]interface{}{
+		"error":         errMsg,
+		"clientID":      client.Key,
+		"clientInitial": clientInitial,
+		"queryString":   getQueryString(query),
+		"scopes":        strings.Fields(r.Form.Get("scope")),
+		"showLogout":    true,
+		"token":         responseType == "token",
 	})
 }
 

@@ -1,20 +1,32 @@
-{{ define "title"}}Register{{ end }}
+{{ define "title" }}Create an account{{ end }}
 
 {{ define "content" }}
-<div class="container">
+<section class="panel auth-panel" aria-labelledby="register-heading">
+  <div class="page-heading">
+    <p class="eyebrow">Get started</p>
+    <h1 id="register-heading">Create an account</h1>
+    <p>Use a valid email address and a strong, unique password.</p>
+  </div>
 
-  <form class="form-signin" action="" method="post">
-    <h2 class="form-signin-heading">Register</h2>
-    {{ if .error }}
-    <p class="text-danger">{{ .error }}</p>
-    {{ end }}
-    <label for="inputEmail" class="sr-only">Email address</label>
-    <input type="email" name="email" id="inputEmail" class="form-control" placeholder="Email address" required autofocus>
-    <label for="inputPassword" class="sr-only">Password</label>
-    <input type="password" name="password" id="inputPassword" class="form-control" placeholder="Password" required>
-    <button class="btn btn-lg btn-primary btn-block" type="submit">Register</button>
-    <p>Already registered? <a href="/web/login{{ .queryString }}">Log in</a>
+  {{ if .error }}
+  <div class="alert" role="alert">
+    <strong>We couldn't create your account.</strong>
+    <span>{{ .error }}</span>
+  </div>
+  {{ end }}
+
+  <form class="form-stack" action="" method="post">
+    <div class="form-field">
+      <label for="inputEmail">Email address</label>
+      <input type="email" name="email" id="inputEmail" autocomplete="username" placeholder="you@example.com" required autofocus>
+    </div>
+    <div class="form-field">
+      <label for="inputPassword">Password</label>
+      <input type="password" name="password" id="inputPassword" autocomplete="new-password" placeholder="Create a password" required>
+    </div>
+    <button class="button button-primary button-block" type="submit">Create account <span aria-hidden="true">→</span></button>
   </form>
 
-</div> <!-- /container -->
+  <p class="auth-switch">Already registered? <a href="/web/login{{ .queryString }}">Sign in</a></p>
+</section>
 {{ end }}

@@ -1,0 +1,30 @@
+{{ define "base" }}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{ template "title" . }} · OAuth2 Server</title>
+  <link rel="stylesheet" href="/css/web.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="site-header">
+      <span class="wordmark" aria-label="OAuth2 Server">OAuth2 <span>Server</span></span>
+      {{ if .showLogout }}
+      <a class="header-link" href="/web/logout{{ .queryString }}">Log out</a>
+      {{ end }}
+    </header>
+
+    <main class="page-main" id="main-content">
+      {{ template "content" . }}
+    </main>
+
+    <footer class="site-footer">
+      <p>Secure authorization for connected applications.</p>
+    </footer>
+  </div>
+</body>
+</html>
+{{ end }}

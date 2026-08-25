@@ -1,40 +1,68 @@
-{{ define "title"}}Authorize{{ end }}
+{{ define "title" }}Authorize access{{ end }}
 
 {{ define "content" }}
-<div class="container">
-  <div class="page-header">
-    <h1>Authorize</h1>
+<section class="panel consent-panel" aria-labelledby="authorize-heading">
+  <div class="page-heading">
+    <p class="eyebrow">Authorization request</p>
+    <h1 id="authorize-heading">Review access</h1>
+    <p>Confirm what the requesting application will be allowed to do.</p>
   </div>
+
   {{ if .error }}
-  <div class="alert alert-danger" role="alert">{{ .error }}div>
+  <div class="alert" role="alert">
+    <strong>Authorization couldn't continue.</strong>
+    <span>{{ .error }}</span>
+  </div>
   {{ else }}
-  <form action="" method="post">
-    <div class="form-group">
-      <p><b>{{ .clientID }}</b> would like to perform actions on your behalf.</p>
-      {{ if .token }}
-      <p>How long do you want to authorize <b>{{ .clientID }}</b> for?</p>
-      <div class="radio">
-        <label class="radio-inline">
-          <input type="radio" name="lifetime" value="3600"> 1 hour
-        </label>
-        <label class="radio-inline">
-          <input type="radio" name="lifetime" value="86400"> 1 day
-        </label>
-        <label class="radio-inline">
-          <input type="radio" name="lifetime" value="604800" checked> 1 week
-        </label>
+  <form class="consent-form" action="" method="post">
+    <div class="client-request">
+      <span class="client-mark" aria-hidden="true">{{ .clientInitial }}</span>
+      <div>
+        <p class="eyebrow">Requesting application</p>
+        <p class="client-name">{{ .clientID }}</p>
+        <p class="client-copy">This application would like to perform actions on your behalf.</p>
       </div>
+    </div>
+
+    <div class="access-section" aria-labelledby="scope-heading">
+      <h2 id="scope-heading">Requested access</h2>
+      {{ if .scopes }}
+      <ul class="scope-list">
+        {{ range .scopes }}
+        <li><code>{{ . }}</code></li>
+        {{ end }}
+      </ul>
+      {{ else }}
+      <p class="section-copy">The application's default access.</p>
       {{ end }}
     </div>
-    <div class="row">
-      <div class="col-md-3 col-sm-4 col-xs-6">
-        <input type="submit" class="btn btn-lg btn-block btn-primary" name="allow" value="Allow">
+
+    {{ if .token }}
+    <fieldset class="access-section">
+      <legend>Access duration</legend>
+      <p class="section-copy">Choose how long this authorization should remain active.</p>
+      <div class="lifetime-options">
+        <label class="lifetime-option">
+          <input type="radio" name="lifetime" value="3600">
+          <span>1 hour</span>
+        </label>
+        <label class="lifetime-option">
+          <input type="radio" name="lifetime" value="86400">
+          <span>1 day</span>
+        </label>
+        <label class="lifetime-option">
+          <input type="radio" name="lifetime" value="604800" checked>
+          <span>1 week</span>
+        </label>
       </div>
-      <div class="col-md-3 col-sm-4 col-xs-6">
-        <input type="submit" class="btn btn-lg btn-block btn-danger" name="deny" value="Deny">
-      </div>
+    </fieldset>
+    {{ end }}
+
+    <div class="consent-actions">
+      <button type="submit" class="button button-primary" name="allow" value="Allow">Allow access <span aria-hidden="true">→</span></button>
+      <button type="submit" class="button button-secondary" name="deny" value="Deny">Deny</button>
     </div>
   </form>
   {{ end }}
-</div>
+</section>
 {{ end }}

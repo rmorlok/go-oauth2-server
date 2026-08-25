@@ -1,20 +1,32 @@
-{{ define "title"}}Log In{{ end }}
+{{ define "title" }}Sign in{{ end }}
 
 {{ define "content" }}
-<div class="container">
+<section class="panel auth-panel" aria-labelledby="sign-in-heading">
+  <div class="page-heading">
+    <p class="eyebrow">Secure access</p>
+    <h1 id="sign-in-heading">Welcome back</h1>
+    <p>Sign in to continue to the requesting application.</p>
+  </div>
 
-  <form class="form-signin" action="" method="post">
-    <h2 class="form-signin-heading">Log In</h2>
-    {{ if .error }}
-    <p class="text-danger">{{ .error }}</p>
-    {{ end }}
-    <label for="inputEmail" class="sr-only">Email address</label>
-    <input type="email" name="email" id="inputEmail" class="form-control" placeholder="Email address" required autofocus>
-    <label for="inputPassword" class="sr-only">Password</label>
-    <input type="password" name="password" id="inputPassword" class="form-control" placeholder="Password" required>
-    <button class="btn btn-lg btn-primary btn-block" type="submit">Log In</button>
-    <p>Don't have an account yet? <a href="/web/register{{ .queryString }}">Register</a>
+  {{ if .error }}
+  <div class="alert" role="alert">
+    <strong>We couldn't sign you in.</strong>
+    <span>{{ .error }}</span>
+  </div>
+  {{ end }}
+
+  <form class="form-stack" action="" method="post">
+    <div class="form-field">
+      <label for="inputEmail">Email address</label>
+      <input type="email" name="email" id="inputEmail" autocomplete="username" placeholder="you@example.com" required autofocus>
+    </div>
+    <div class="form-field">
+      <label for="inputPassword">Password</label>
+      <input type="password" name="password" id="inputPassword" autocomplete="current-password" placeholder="Enter your password" required>
+    </div>
+    <button class="button button-primary button-block" type="submit">Sign in <span aria-hidden="true">→</span></button>
   </form>
 
-</div> <!-- /container -->
+  <p class="auth-switch">New here? <a href="/web/register{{ .queryString }}">Create an account</a></p>
+</section>
 {{ end }}
